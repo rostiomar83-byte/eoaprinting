@@ -77,9 +77,10 @@ risk_manager = RiskManager()
 def get_balance() -> float:
     try:
         bal = exchange.fetch_balance()
-        # Kraken restituisce 'USD' non 'USDT'
-        usd = bal.get("USD") or bal.get("USDT") or {}
-        return usd.get("free", 0.0)
+        for k in ("USD", "USDT", "ZUSD"):
+            if k in bal and bal[k].get("free", 0) > 0:
+                return bal[k]["free"]
+        return 0.0
     except Exception as e:
         log(f"[BALANCE ERR] {e}")
         return 0.0
