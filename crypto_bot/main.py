@@ -86,7 +86,7 @@ def get_balance() -> float:
         return 0.0
 
 
-def place_buy(symbol: str, amount_usd: float, price: float, sl: float, tp: float, engine: str):
+def place_buy(symbol: str, amount_usd: float, price: float, sl: float, tp: float, engine: str, atr: float = 0.0):
     qty = amount_usd / price
     try:
         exchange.create_market_buy_order(symbol, qty)
@@ -98,6 +98,7 @@ def place_buy(symbol: str, amount_usd: float, price: float, sl: float, tp: float
             "engine": engine,
             "entry_time": datetime.now().isoformat(),
             "trailing_sl": sl,
+            "atr": atr,
         }
         msg = (f"✅ BUY {engine} {symbol}\n"
                f"  Prezzo: {price:.4f}\n"
@@ -345,16 +346,7 @@ while _running:
                         if risk_manager.check_exposure(bal, open_value) and len(positions) < 4:
                             sl = price_trix - ATR_SL_MULT * atr_trix
                             tp = price_trix + ATR_TP_MULT * atr_trix
-                            positions[symbol] = {
-                                "entry_price": price_trix,
-                                "sl": sl, "tp": tp,
-                                "qty": TRADE_AMOUNT_USDT / price_trix,
-                                "engine": "TRIX",
-                                "entry_time": datetime.now().isoformat(),
-                                "trailing_sl": sl,
-                                "atr": atr_trix,
-                            }
-                            place_buy(symbol, TRADE_AMOUNT_USDT, price_trix, sl, tp, "TRIX")
+                            place_buy(symbol, TRADE_AMOUNT_USDT, price_trix, sl, tp, "TRIX", atr_trix)
 
                 # -------------------------------------------------- #
                 # Engine 1: MultiTF 5m + 15m                         #
@@ -369,7 +361,7 @@ while _running:
                     if risk_manager.check_exposure(bal, open_value) and len(positions) < 4:
                         sl = price_mtf - ATR_SL_MULT * atr_mtf
                         tp = price_mtf + ATR_TP_MULT * atr_mtf
-                        place_buy(symbol, TRADE_AMOUNT_USDT, price_mtf, sl, tp, sig_mtf)
+                        place_buy(symbol, TRADE_AMOUNT_USDT, price_mtf, sl, tp, sig_mtf, atr_mtf)
 
                 elif sig_mtf in ("SELL_5M", "SELL_15M") and has_pos_multi:
                     place_sell(symbol, sig_mtf)
