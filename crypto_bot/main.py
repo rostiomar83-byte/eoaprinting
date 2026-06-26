@@ -77,7 +77,9 @@ risk_manager = RiskManager()
 def get_balance() -> float:
     try:
         bal = exchange.fetch_balance()
-        return bal["USDT"]["free"]
+        # Kraken restituisce 'USD' non 'USDT'
+        usd = bal.get("USD") or bal.get("USDT") or {}
+        return usd.get("free", 0.0)
     except Exception as e:
         log(f"[BALANCE ERR] {e}")
         return 0.0
@@ -359,7 +361,8 @@ while _running:
                 sig_mtf, rsi_mtf, price_mtf, atr_mtf = get_signal_multitf(
                     exchange, symbol, has_pos_multi, regime
                 )
-                log(f"[{symbol}] MultiTF={sig_mtf} RSI={rsi_mtf:.1f if rsi_mtf else 'N/A'}")
+                rsi_str = f"{rsi_mtf:.1f}" if rsi_mtf is not None else "N/A"
+                log(f"[{symbol}] MultiTF={sig_mtf} RSI={rsi_str}")
 
                 if sig_mtf in ("BUY_5M", "BUY_15M") and not has_pos_multi:
                     if risk_manager.check_exposure(bal, open_value) and len(positions) < 4:
