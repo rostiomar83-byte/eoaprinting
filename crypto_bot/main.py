@@ -21,7 +21,7 @@ load_dotenv()
 from config import (
     SYMBOLS, LOOP_SLEEP_SECONDS, HEARTBEAT_HOURS,
     ATR_SL_MULT, ATR_TP_MULT, TRAILING_ATR_MULT, TRADE_AMOUNT_USDT,
-    LOG_FILE, DCA_AMOUNT_USDT,
+    LOG_FILE, DCA_AMOUNT_USDT, STATE_FILE,
 )
 from market_regime import get_regime
 from strategy_multiTF import get_signal_multitf
@@ -65,7 +65,26 @@ exchange = ccxt.kraken({
 # State                                                                #
 # ------------------------------------------------------------------ #
 
-positions: dict = {}   # symbol → {entry_price, sl, tp, qty, engine}
+import json
+
+def _load_positions() -> dict:
+    if not os.path.exists(STATE_FILE):
+        return {}
+    try:
+        with open(STATE_FILE) as f:
+            data = json.load(f)
+        if data:
+            log(f"[STATE] Caricate {len(data)} posizioni da disco: {list(data.keys())}")
+        return data
+    except Exception:
+        return {}
+
+def _save_positions():
+    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+    with open(STATE_FILE, "w") as f:
+        json.dump(positions, f, indent=2)
+
+positions: dict = _load_positions()   # symbol → {entry_price, sl, tp, qty, engine, atr}
 mr_manager = MeanRevManager()
 risk_manager = RiskManager()
 
@@ -106,6 +125,7 @@ def place_buy(symbol: str, amount_usd: float, price: float, sl: float, tp: float
                f"  Qty: {qty:.4f}  ~{amount_usd:.0f}$")
         log(msg)
         tg.send_message(msg)
+        _save_positions()
     except Exception as e:
         log(f"[BUY ERR {symbol}] {e}")
         tg.send_message(f"❌ BUY error {symbol}: {e}")
@@ -129,6 +149,7 @@ def place_sell(symbol: str, reason: str):
         log(msg)
         tg.send_message(msg)
         positions.pop(symbol, None)
+        _save_positions()
     except Exception as e:
         log(f"[SELL ERR {symbol}] {e}")
         tg.send_message(f"❌ SELL error {symbol}: {e}")
