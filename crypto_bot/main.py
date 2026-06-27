@@ -153,6 +153,18 @@ def _open_value() -> float:
     return multi + mr
 
 
+def _atr_1h(df) -> float:
+    """ATR(14) su candele 1h — riferimento per dimensionare SL/TP/trailing."""
+    try:
+        import ta
+        atr = ta.volatility.AverageTrueRange(
+            df["high"], df["low"], df["close"], window=14
+        ).average_true_range().iloc[-1]
+        return float(atr)
+    except Exception:
+        return None
+
+
 def place_buy(symbol: str, amount_usd: float, price: float, sl: float, tp: float,
               engine: str, atr: float = 0.0, regime: str = "RANGING"):
     qty = amount_usd / price
@@ -276,13 +288,14 @@ _running = True
 _last_heartbeat_hour = -1
 
 log("=" * 60)
-log(f"CryptoBot Omar v4.1 AVVIATO — {len(SYMBOLS)} simboli")
+log(f"CryptoBot Omar v4.2 AVVIATO — {len(SYMBOLS)} simboli")
 log(f"Engines: MultiTF+4H | TRIX+ADX+4H | MeanRev+BB+FastRSI")
-log(f"R:R 1:3.3 | PartialTP@2ATR | TimeFilter {TRADE_HOUR_START}-{TRADE_HOUR_END}UTC | Vol×1.5")
+log(f"Sizing su ATR 1h | R:R 1:3.3 | PartialTP+fee gate | "
+    f"TimeFilter {TRADE_HOUR_START}-{TRADE_HOUR_END}UTC | PnL netto fee")
 log("=" * 60)
-tg.send_message(f"🚀 <b>CryptoBot Omar v4.1 AVVIATO</b>\n"
+tg.send_message(f"🚀 <b>CryptoBot Omar v4.2 AVVIATO</b>\n"
                 f"Simboli: {', '.join(SYMBOLS)}\n"
-                f"R:R 1:3.3 | PartialTP@2ATR | 4H EMA filter | TimeFilter")
+                f"Sizing ATR 1h | R:R 1:3.3 | PnL netto fee | fee-gate | 4H EMA")
 
 
 def _fetch_regime_df(symbol: str):
@@ -356,6 +369,11 @@ while _running:
                 if df_regime is None:
                     continue
                 regime = get_regime(df_regime)
+
+                # ATR 1h come riferimento UNICO per SL/TP/trailing/partial.
+                # Movimenti 1h (~0.8-1.5%) coprono la fee 0.52% con margine reale.
+                # Riusa df_regime (1h) → nessuna chiamata API aggiuntiva.
+                atr_h = _atr_1h(df_regime)
 
                 # Cooldown check: no nuovi long dopo SL perdente per 60 min
                 in_cooldown = (symbol in multitf_cooldown and
@@ -472,19 +490,19 @@ while _running:
                     log(f"[MR SELL] {symbol} RSI={rsi_mr:.1f} PnL={pnl:+.3f}$")
 
                 elif sig_mr == "BUY_MR" and not has_pos_mr and not has_pos_multi:
-                    if not _atr_valid(atr_mr):
-                        log(f"[MR SKIP {symbol}] ATR non valido")
-                    elif not _edge_ok(atr_mr, price_mr):
+                    if not _atr_valid(atr_h):
+                        log(f"[MR SKIP {symbol}] ATR 1h non valido")
+                    elif not _edge_ok(atr_h, price_mr):
                         log(f"[MR SKIP {symbol}] edge troppo piccolo: TP non copre fee 0.52%")
                     elif btc_regime == "TRENDING_DOWN" and symbol != "BTC/USD" and len(mr_manager.positions) >= 2:
                         log(f"[MR SKIP {symbol}] BTC TRENDING_DOWN — anti-correlazione")
                     else:
                         ok_mr, reason_mr = mr_manager.can_buy(bal, symbol)
                         if ok_mr and risk_manager.check_exposure(equity, open_value):
-                            mr_manager.register_buy(symbol, price_mr, atr_mr)
+                            mr_manager.register_buy(symbol, price_mr, atr_h)
                             tg.send_message(f"🟢 MR BUY {symbol}\n"
                                             f"  RSI: {rsi_mr:.1f}  BB touch ✓  FastRSI ✓\n"
-                                            f"  SL: {price_mr - 1.0*atr_mr:.4f}  TP: {price_mr + 2.5*atr_mr:.4f}")
+                                            f"  SL: {price_mr - 1.0*atr_h:.4f}  TP: {price_mr + 2.5*atr_h:.4f}")
                             log(f"[MR BUY] {symbol} RSI={rsi_mr:.1f} price={price_mr:.4f}")
                         else:
                             log(f"[MR SKIP {symbol}] {reason_mr}")
@@ -497,12 +515,12 @@ while _running:
                         exchange, symbol, has_pos_multi, regime, above_4h_ema
                     )
                     if (sig_trix == "BUY_TRIX" and not has_pos_multi and not has_pos_mr
-                            and not in_cooldown and _atr_valid(atr_trix)
-                            and _edge_ok(atr_trix, price_trix)):
+                            and not in_cooldown and _atr_valid(atr_h)
+                            and _edge_ok(atr_h, price_trix)):
                         if risk_manager.check_exposure(equity, open_value) and len(positions) < MAX_OPEN_POSITIONS:
-                            sl = price_trix - ATR_SL_MULT * atr_trix
-                            tp = price_trix + ATR_TP_MULT * atr_trix
-                            place_buy(symbol, trade_amt, price_trix, sl, tp, "TRIX", atr_trix, regime)
+                            sl = price_trix - ATR_SL_MULT * atr_h
+                            tp = price_trix + ATR_TP_MULT * atr_h
+                            place_buy(symbol, trade_amt, price_trix, sl, tp, "TRIX", atr_h, regime)
 
                 # -------------------------------------------------- #
                 # Engine 1: MultiTF 5m + 15m + 4H EMA               #
@@ -514,12 +532,12 @@ while _running:
                 log(f"[{symbol}] MultiTF={sig_mtf} RSI={rsi_str}")
 
                 if (sig_mtf in ("BUY_5M", "BUY_15M") and not has_pos_multi and not has_pos_mr
-                        and not in_cooldown and _atr_valid(atr_mtf)
-                        and _edge_ok(atr_mtf, price_mtf)):
+                        and not in_cooldown and _atr_valid(atr_h)
+                        and _edge_ok(atr_h, price_mtf)):
                     if risk_manager.check_exposure(equity, open_value) and len(positions) < MAX_OPEN_POSITIONS:
-                        sl = price_mtf - ATR_SL_MULT * atr_mtf
-                        tp = price_mtf + ATR_TP_MULT * atr_mtf
-                        place_buy(symbol, trade_amt, price_mtf, sl, tp, sig_mtf, atr_mtf, regime)
+                        sl = price_mtf - ATR_SL_MULT * atr_h
+                        tp = price_mtf + ATR_TP_MULT * atr_h
+                        place_buy(symbol, trade_amt, price_mtf, sl, tp, sig_mtf, atr_h, regime)
 
                 elif sig_mtf in ("SELL_5M", "SELL_15M") and has_pos_multi:
                     place_sell(symbol, sig_mtf)
