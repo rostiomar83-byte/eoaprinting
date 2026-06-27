@@ -38,6 +38,7 @@ from config import (
     LOG_FILE, DCA_AMOUNT_USDT, STATE_FILE,
     TRADE_HOUR_START, TRADE_HOUR_END,
     FEE_RATE, MIN_TP1_NET_PCT, MAX_OPEN_POSITIONS,
+    VOL_GUARD_ENABLED, VOL_SPIKE_MULT, VOL_BASELINE_PERIODS,
 )
 from market_regime import get_regime
 from strategy_multiTF import get_signal_multitf
@@ -173,6 +174,27 @@ def _atr_1h(df) -> float:
         return None
 
 
+def _vol_ratio(df) -> float:
+    """
+    Rapporto tra volatilità attuale e media storica (ATR% su 1h).
+    >1 = sopra la norma, >VOL_SPIKE_MULT = spike (rischio crollo).
+    Ritorna 1.0 (neutro) in caso di errore → fail-safe, non blocca.
+    """
+    try:
+        import ta
+        atr_series = ta.volatility.AverageTrueRange(
+            df["high"], df["low"], df["close"], window=14
+        ).average_true_range()
+        atr_pct = atr_series / df["close"]
+        baseline = atr_pct.rolling(VOL_BASELINE_PERIODS).mean().iloc[-1]
+        current = atr_pct.iloc[-1]
+        if baseline and baseline > 0:
+            return float(current / baseline)
+        return 1.0
+    except Exception:
+        return 1.0
+
+
 def place_buy(symbol: str, amount_usd: float, price: float, sl: float, tp: float,
               engine: str, atr: float = 0.0, regime: str = "RANGING"):
     qty = _amt(symbol, amount_usd / price)
@@ -267,10 +289,12 @@ def _cmd_pnl():
 
 def _cmd_status():
     cds = [s for s, t in multitf_cooldown.items() if datetime.now() < t]
-    tg.send_message(f"🤖 CryptoBot Omar v4.1 attivo\n"
+    guard = "🛡️ RISK-OFF" if _last_risk_off else "🟢 normale"
+    tg.send_message(f"🤖 CryptoBot Omar v4.3 attivo\n"
                     f"  Simboli: {len(SYMBOLS)}\n"
                     f"  Pos aperte: {len(positions) + len(mr_manager.positions)}\n"
                     f"  Daily PnL: {risk_manager.daily_pnl:+.2f}$\n"
+                    f"  Volatility Guard: {guard}\n"
                     f"  Cooldown: {cds if cds else 'nessuno'}")
 
 
@@ -294,16 +318,18 @@ tg.start_polling({
 
 _running = True
 _last_heartbeat_hour = -1
+_last_risk_off = False   # stato precedente del Volatility Guard (per alert una-tantum)
 
 log("=" * 60)
-log(f"CryptoBot Omar v4.2 AVVIATO — {len(SYMBOLS)} simboli")
+log(f"CryptoBot Omar v4.3 AVVIATO — {len(SYMBOLS)} simboli")
 log(f"Engines: MultiTF+4H | TRIX+ADX+4H | MeanRev+BB+FastRSI")
 log(f"Sizing su ATR 1h | R:R 1:3.3 | PartialTP+fee gate | "
-    f"TimeFilter {TRADE_HOUR_START}-{TRADE_HOUR_END}UTC | PnL netto fee")
+    f"TimeFilter {TRADE_HOUR_START}-{TRADE_HOUR_END}UTC | PnL netto fee | "
+    f"VolGuard {VOL_SPIKE_MULT}×")
 log("=" * 60)
-tg.send_message(f"🚀 <b>CryptoBot Omar v4.2 AVVIATO</b>\n"
+tg.send_message(f"🚀 <b>CryptoBot Omar v4.3 AVVIATO</b>\n"
                 f"Simboli: {', '.join(SYMBOLS)}\n"
-                f"Sizing ATR 1h | R:R 1:3.3 | PnL netto fee | fee-gate | 4H EMA")
+                f"Sizing ATR 1h | R:R 1:3.3 | PnL netto fee | 🛡️ Volatility Guard")
 
 
 def _fetch_regime_df(symbol: str):
@@ -371,6 +397,21 @@ while _running:
         btc_df = _fetch_regime_df("BTC/USD")
         btc_regime = get_regime(btc_df) if btc_df is not None else "UNKNOWN"
 
+        # Volatility Guard globale: spike di volatilità su BTC = stress di mercato
+        # → risk-off su TUTTI gli asset (nessun nuovo long). Difesa anti-crollo.
+        btc_vol = _vol_ratio(btc_df) if btc_df is not None else 1.0
+        global_risk_off = VOL_GUARD_ENABLED and btc_vol > VOL_SPIKE_MULT
+        if global_risk_off and not _last_risk_off:
+            msg = (f"🛡️ <b>RISK-OFF attivato</b>\n"
+                   f"  Volatilità BTC {btc_vol:.1f}× la norma — stop nuovi ingressi.\n"
+                   f"  Le posizioni aperte restano protette dai loro stop.")
+            log(f"[VOL GUARD] RISK-OFF ON — BTC vol {btc_vol:.2f}×")
+            tg.send_message(msg)
+        elif not global_risk_off and _last_risk_off:
+            log(f"[VOL GUARD] RISK-OFF OFF — BTC vol {btc_vol:.2f}× rientrata")
+            tg.send_message(f"✅ Risk-off rientrato — volatilità BTC normalizzata ({btc_vol:.1f}×).")
+        _last_risk_off = global_risk_off
+
         for symbol in SYMBOLS:
             try:
                 df_regime = _fetch_regime_df(symbol)
@@ -387,11 +428,17 @@ while _running:
                 in_cooldown = (symbol in multitf_cooldown and
                                datetime.now() < multitf_cooldown[symbol])
 
+                # Volatility Guard per-asset: spike locale O risk-off globale.
+                sym_vol = _vol_ratio(df_regime)
+                vol_spike = VOL_GUARD_ENABLED and (global_risk_off or sym_vol > VOL_SPIKE_MULT)
+
                 flags = []
                 if in_cooldown:
                     flags.append(f"COOLDOWN→{multitf_cooldown[symbol].strftime('%H:%M')}")
                 if not in_trading_hours:
                     flags.append("NO-HOURS")
+                if vol_spike:
+                    flags.append(f"VOL-GUARD({sym_vol:.1f}×)")
                 log(f"[{symbol}] Regime:{regime} BTC:{btc_regime}"
                     + (f" [{' '.join(flags)}]" if flags else ""))
 
@@ -498,7 +545,9 @@ while _running:
                     log(f"[MR SELL] {symbol} RSI={rsi_mr:.1f} PnL={pnl:+.3f}$")
 
                 elif sig_mr == "BUY_MR" and not has_pos_mr and not has_pos_multi:
-                    if not _atr_valid(atr_h):
+                    if vol_spike:
+                        log(f"[MR SKIP {symbol}] Volatility Guard (vol {sym_vol:.1f}×)")
+                    elif not _atr_valid(atr_h):
                         log(f"[MR SKIP {symbol}] ATR 1h non valido")
                     elif not _edge_ok(atr_h, price_mr):
                         log(f"[MR SKIP {symbol}] edge troppo piccolo: TP non copre fee 0.52%")
@@ -523,7 +572,7 @@ while _running:
                         exchange, symbol, has_pos_multi, regime, above_4h_ema
                     )
                     if (sig_trix == "BUY_TRIX" and not has_pos_multi and not has_pos_mr
-                            and not in_cooldown and _atr_valid(atr_h)
+                            and not in_cooldown and not vol_spike and _atr_valid(atr_h)
                             and _edge_ok(atr_h, price_trix)):
                         if risk_manager.check_exposure(equity, open_value) and len(positions) < MAX_OPEN_POSITIONS:
                             sl = price_trix - ATR_SL_MULT * atr_h
@@ -540,7 +589,7 @@ while _running:
                 log(f"[{symbol}] MultiTF={sig_mtf} RSI={rsi_str}")
 
                 if (sig_mtf in ("BUY_5M", "BUY_15M") and not has_pos_multi and not has_pos_mr
-                        and not in_cooldown and _atr_valid(atr_h)
+                        and not in_cooldown and not vol_spike and _atr_valid(atr_h)
                         and _edge_ok(atr_h, price_mtf)):
                     if risk_manager.check_exposure(equity, open_value) and len(positions) < MAX_OPEN_POSITIONS:
                         sl = price_mtf - ATR_SL_MULT * atr_h

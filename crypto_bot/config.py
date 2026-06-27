@@ -38,6 +38,15 @@ DCA_AMOUNT_USDT = 10             # DCA lunedì mattina
 TRADE_HOUR_START = 7             # no nuovi ingressi 23:00-07:00 UTC
 TRADE_HOUR_END = 23              # sessione asiatica: volume basso, spread alti
 
+# --- Volatility Guard (scudo anti-crollo) ---
+# Quando l'ATR% attuale supera VOL_SPIKE_MULT × la sua media storica, la
+# volatilità sta esplodendo (tipico prima/durante i crolli): il bot BLOCCA i
+# nuovi ingressi. Le posizioni aperte restano gestite normalmente dai loro stop.
+# Se BTC entra in spike → risk-off globale (nessun nuovo long su nessun asset).
+VOL_GUARD_ENABLED = True
+VOL_SPIKE_MULT = 1.8            # 1.8× la volatilità media → blocco ingressi
+VOL_BASELINE_PERIODS = 50      # finestra (candele 1h) per la media ATR%
+
 LOOP_SLEEP_SECONDS = 60
 
 LOG_FILE = os.path.expanduser("~/crypto_bot/bot.log")
