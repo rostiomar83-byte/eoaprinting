@@ -290,7 +290,8 @@ def _cmd_pnl():
 def _cmd_status():
     cds = [s for s, t in multitf_cooldown.items() if datetime.now() < t]
     guard = "🛡️ RISK-OFF" if _last_risk_off else "🟢 normale"
-    tg.send_message(f"🤖 CryptoBot Omar v4.4 attivo\n"
+    stato = "⏸ IN PAUSA" if _paused else "▶️ attivo"
+    tg.send_message(f"🤖 CryptoBot Omar v4.4 — {stato}\n"
                     f"  Simboli: {len(SYMBOLS)}\n"
                     f"  Pos aperte: {len(positions) + len(mr_manager.positions)}\n"
                     f"  Daily PnL: {risk_manager.daily_pnl:+.2f}$\n"
@@ -304,13 +305,59 @@ def _cmd_stop():
     _running = False
 
 
-def _cmd_help():
+def _cmd_pause():
+    global _paused
+    _paused = True
+    tg.send_message("⏸ Bot in PAUSA — nessun nuovo ingresso.\n"
+                    "SL/TP sulle posizioni aperte continuano.\n"
+                    "Usa /resume per riprendere.")
+
+
+def _cmd_resume():
+    global _paused
+    _paused = False
+    tg.send_message("▶️ Bot RIPRESO — nuovi ingressi abilitati.")
+
+
+def _cmd_log():
+    try:
+        with open(LOG_FILE) as f:
+            lines = f.readlines()
+        last = "".join(lines[-20:]).strip()
+        tg.send_message(f"📋 <b>Ultime 20 righe log:</b>\n<pre>{last}</pre>")
+    except Exception as e:
+        tg.send_message(f"❌ Errore lettura log: {e}")
+
+
+def _cmd_risk():
+    bal = get_balance()
+    open_val = _open_value()
+    equity = bal + open_val
+    exp_pct = (open_val / equity * 100) if equity > 0 else 0
+    from config import MAX_DAILY_LOSS_USDT, MAX_WEEKLY_LOSS_USDT, MAX_EXPOSURE_PCT
     tg.send_message(
-        "🤖 <b>CryptoBot Omar v4.4</b> — Comandi disponibili:\n\n"
-        "/balance — Saldo USDT libero + PnL giornaliero/settimanale\n"
+        f"📊 <b>Risk Manager</b>\n\n"
+        f"Equity totale: {equity:.2f}$\n"
+        f"Saldo libero: {bal:.2f}$\n"
+        f"Esposto: {open_val:.2f}$ ({exp_pct:.1f}% / max {MAX_EXPOSURE_PCT*100:.0f}%)\n\n"
+        f"Daily PnL: {risk_manager.daily_pnl:+.2f}$ (limite: -{MAX_DAILY_LOSS_USDT}$)\n"
+        f"Weekly PnL: {risk_manager.weekly_pnl:+.2f}$ (limite: -{MAX_WEEKLY_LOSS_USDT}$)\n"
+        f"MR PnL totale: {mr_manager.total_pnl:+.2f}$"
+    )
+
+
+def _cmd_help():
+    paused = "⏸ IN PAUSA" if _paused else "▶️ attivo"
+    tg.send_message(
+        f"🤖 <b>CryptoBot Omar v4.4</b> [{paused}]\n\n"
+        "/balance — Saldo USDT + PnL giornaliero/settimanale\n"
         "/positions — Posizioni aperte\n"
-        "/pnl — PnL dettagliato (oggi, settimana, MR totale)\n"
-        "/status — Stato bot, Volatility Guard, cooldown\n"
+        "/pnl — PnL dettagliato\n"
+        "/status — Stato bot e Volatility Guard\n"
+        "/risk — Esposizione e limiti di rischio\n"
+        "/log — Ultime 20 righe del log\n"
+        "/pause — Sospendi nuovi ingressi\n"
+        "/resume — Riprendi dopo pausa\n"
         "/stop — Ferma il bot\n"
         "/help — Mostra questo messaggio"
     )
@@ -321,6 +368,10 @@ tg.start_polling({
     "/positions": _cmd_positions,
     "/pnl": _cmd_pnl,
     "/status": _cmd_status,
+    "/risk": _cmd_risk,
+    "/log": _cmd_log,
+    "/pause": _cmd_pause,
+    "/resume": _cmd_resume,
     "/stop": _cmd_stop,
     "/help": _cmd_help,
 })
@@ -330,6 +381,7 @@ tg.start_polling({
 # ------------------------------------------------------------------ #
 
 _running = True
+_paused = False
 _last_heartbeat_hour = -1
 _last_risk_off = False   # stato precedente del Volatility Guard (per alert una-tantum)
 
@@ -404,7 +456,7 @@ while _running:
         equity = bal + open_value   # esposizione misurata su equity totale, non solo free
 
         # Filtro orario: no nuovi ingressi 23:00-07:00 UTC
-        in_trading_hours = TRADE_HOUR_START <= now_utc.hour < TRADE_HOUR_END
+        in_trading_hours = TRADE_HOUR_START <= now_utc.hour < TRADE_HOUR_END and not _paused
 
         # Fetch BTC regime per filtro anti-correlazione
         btc_df = _fetch_regime_df("BTC/USD")
