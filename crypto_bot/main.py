@@ -408,8 +408,17 @@ def _fetch_regime_df(symbol: str):
         return None
 
 
+_ema4h_cache: dict = {}  # symbol → (result: bool, fetched_at: datetime)
+_EMA4H_CACHE_SECONDS = 4 * 3600  # aggiorna ogni 4h, non ogni minuto
+
+
 def _fetch_4h_ema_above(symbol: str) -> bool:
-    """Returns True se close > EMA50 su 4H — struttura rialzista richiesta per nuovi long."""
+    """Returns True se close > EMA50 su 4H. Cache 4h per ridurre chiamate API."""
+    cached = _ema4h_cache.get(symbol)
+    if cached:
+        val, ts = cached
+        if (datetime.now() - ts).total_seconds() < _EMA4H_CACHE_SECONDS:
+            return val
     try:
         import pandas as pd
         import ta
@@ -417,7 +426,9 @@ def _fetch_4h_ema_above(symbol: str) -> bool:
         df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
         close = df["close"]
         ema50 = ta.trend.EMAIndicator(close, window=50).ema_indicator().iloc[-1]
-        return close.iloc[-1] > ema50
+        result = close.iloc[-1] > ema50
+        _ema4h_cache[symbol] = (result, datetime.now())
+        return result
     except Exception:
         return True  # fallback: non bloccare il segnale
 
