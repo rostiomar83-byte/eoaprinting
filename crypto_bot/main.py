@@ -304,12 +304,25 @@ def _cmd_stop():
     _running = False
 
 
+def _cmd_help():
+    tg.send_message(
+        "🤖 <b>CryptoBot Omar v4.4</b> — Comandi disponibili:\n\n"
+        "/balance — Saldo USDT libero + PnL giornaliero/settimanale\n"
+        "/positions — Posizioni aperte\n"
+        "/pnl — PnL dettagliato (oggi, settimana, MR totale)\n"
+        "/status — Stato bot, Volatility Guard, cooldown\n"
+        "/stop — Ferma il bot\n"
+        "/help — Mostra questo messaggio"
+    )
+
+
 tg.start_polling({
     "/balance": _cmd_balance,
     "/positions": _cmd_positions,
     "/pnl": _cmd_pnl,
     "/status": _cmd_status,
     "/stop": _cmd_stop,
+    "/help": _cmd_help,
 })
 
 # ------------------------------------------------------------------ #
