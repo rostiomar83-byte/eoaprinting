@@ -2,10 +2,10 @@
 TRIX + ADX strategy (rating 9.7)
 - TRIX: Triple EMA percentuale — filtra rumore meglio di MACD
 - ADX: conferma che il trend è abbastanza forte
-- Entry: TRIX incrocia la sua signal line verso l'alto in trend confermato
-- Exit: TRIX incrocia verso il basso O trailing ATR
-
-Funziona in TRENDING_UP e anche in RANGING con breakout confermato.
+- 4H EMA filter: entra solo se sopra EMA50 su 4H (struttura rialzista)
+- Volume: richiede 1.2× media 20p (era 0.8× — troppo permissivo)
+- Entry: TRIX incrocia signal line al rialzo in trend confermato
+- Exit: TRIX incrocia al ribasso O trailing ATR
 """
 
 import pandas as pd
@@ -14,8 +14,9 @@ from config import ADX_THRESHOLD
 
 TRIX_PERIOD = 14
 TRIX_SIGNAL = 9        # EMA della TRIX
-MIN_ADX_TRIX = 20      # ADX minimo per TRIX (leggermente sotto la soglia globale)
-ATR_TRAIL_MULT = 1.8   # trailing stop in ATR
+MIN_ADX_TRIX = 20      # ADX minimo per TRIX
+ATR_TRAIL_MULT = 1.8
+VOLUME_MULT_TRIX = 1.2  # era 0.8 — filtro volume potenziato
 
 
 def _ema(series: pd.Series, period: int) -> pd.Series:
@@ -26,18 +27,17 @@ def _trix(close: pd.Series, period: int) -> pd.Series:
     ema1 = _ema(close, period)
     ema2 = _ema(ema1, period)
     ema3 = _ema(ema2, period)
-    trix = ema3.pct_change() * 100
-    return trix
+    return ema3.pct_change() * 100
 
 
-def get_signal_trix(exchange, symbol: str, has_position: bool, regime: str = None):
+def get_signal_trix(exchange, symbol: str, has_position: bool,
+                    regime: str = None, above_4h_ema: bool = True):
     """
     Returns (signal, trix_value, price, atr)
     signal: 'BUY_TRIX', 'SELL_TRIX', 'HOLD'
+    above_4h_ema: filtro struttura 4H calcolato in main loop
     """
-    # TRIX funziona bene in trend, accettabile in ranging con ADX sufficiente
     if regime == "TRENDING_DOWN" and not has_position:
-        # Non entriamo long in downtrend con TRIX
         return "HOLD", None, None, None
 
     try:
@@ -56,9 +56,7 @@ def get_signal_trix(exchange, symbol: str, has_position: bool, regime: str = Non
     atr = ta.volatility.AverageTrueRange(df["high"], df["low"], close, window=14).average_true_range().iloc[-1]
 
     # ADX
-    adx_ind = ta.trend.ADXIndicator(df["high"], df["low"], close, window=14)
-    adx = adx_ind.adx().iloc[-1]
-
+    adx = ta.trend.ADXIndicator(df["high"], df["low"], close, window=14).adx().iloc[-1]
     if adx < MIN_ADX_TRIX:
         return "HOLD", None, price, atr
 
@@ -71,15 +69,15 @@ def get_signal_trix(exchange, symbol: str, has_position: bool, regime: str = Non
     sig_now = signal_line.iloc[-1]
     sig_prev = signal_line.iloc[-2]
 
-    # Volume confermato
+    # Volume filter potenziato
     vol_avg = df["volume"].rolling(20).mean().iloc[-1]
     vol_now = df["volume"].iloc[-1]
-    vol_ok = vol_now > vol_avg * 0.8  # soglia morbida per non perdere troppi segnali
+    vol_ok = vol_now > vol_avg * VOLUME_MULT_TRIX
 
-    # --- ENTRATA: crossover TRIX al rialzo ---
-    if not has_position:
+    # --- ENTRATA: crossover TRIX al rialzo + 4H EMA filter ---
+    if not has_position and above_4h_ema:
         bullish_cross = (trix_prev < sig_prev) and (trix_now > sig_now)
-        trix_positive = trix_now > 0  # conferma momentum positivo
+        trix_positive = trix_now > 0
         if bullish_cross and trix_positive and vol_ok:
             return "BUY_TRIX", round(trix_now, 4), price, atr
 
@@ -89,4 +87,5 @@ def get_signal_trix(exchange, symbol: str, has_position: bool, regime: str = Non
         if bearish_cross:
             return "SELL_TRIX", round(trix_now, 4), price, atr
 
-    return "HOLD", round(trix_now, 4) if trix_now == trix_now else None, price, atr
+    trix_val = round(trix_now, 4) if trix_now == trix_now else None
+    return "HOLD", trix_val, price, atr

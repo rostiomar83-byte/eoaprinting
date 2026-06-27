@@ -1,8 +1,8 @@
 """
 MultiTimeframe trend-following strategy (5m + 15m).
-- BUY solo in TRENDING_UP: RSI pullback 40-58, EMA rising, volume ok
+- BUY solo in TRENDING_UP + sopra 4H EMA50: RSI pullback 40-58, EMA rising, volume ok
+- BB Squeeze: breakout in RANGING con conferma 4H EMA + volume potenziato
 - SELL solo in TRENDING_DOWN: RSI 42-60, EMA falling, volume ok
-- BB Squeeze: rilevamento breakout in RANGING per catturare uscita dalla compressione
 """
 
 import pandas as pd
@@ -35,10 +35,12 @@ def _detect_bb_squeeze(df: pd.DataFrame) -> bool:
     return False
 
 
-def get_signal_multitf(exchange, symbol: str, has_position: bool, regime: str = None):
+def get_signal_multitf(exchange, symbol: str, has_position: bool,
+                        regime: str = None, above_4h_ema: bool = True):
     """
     Returns (signal, rsi, price, atr)
     signal: 'BUY_5M', 'BUY_15M', 'SELL_5M', 'SELL_15M', 'HOLD'
+    above_4h_ema: filtro struttura 4H calcolato in main loop (evita duplicare fetch)
     """
     try:
         df_5m = _fetch(exchange, symbol, "5m")
@@ -70,25 +72,23 @@ def get_signal_multitf(exchange, symbol: str, has_position: bool, regime: str = 
     vol_now = df_5m["volume"].iloc[-1]
     vol_ok = vol_now > vol_avg * VOLUME_FILTER_MULT
 
-    # BB squeeze breakout (RANGING)
-    if regime == "RANGING":
+    # BB squeeze breakout (RANGING + struttura 4H rialzista)
+    if regime == "RANGING" and above_4h_ema:
         squeeze = _detect_bb_squeeze(df_5m)
         if squeeze and not has_position:
-            # Direzione breakout = direzione della ultima candela
             last_candle_bull = df_5m["close"].iloc[-1] > df_5m["open"].iloc[-1]
             if last_candle_bull and vol_ok:
                 return "BUY_5M", rsi_5m, price, atr
 
-    # --- BUY in TRENDING_UP ---
-    if regime == "TRENDING_UP" and not has_position:
+    # --- BUY in TRENDING_UP + sopra 4H EMA50 ---
+    if regime == "TRENDING_UP" and not has_position and above_4h_ema:
         rsi_ok = RSI_BUY_MIN <= rsi_5m <= RSI_BUY_MAX
         if rsi_ok and ema_up and vol_ok:
             # Conferma 15m
             rsi_15m = ta.momentum.RSIIndicator(close_15m, window=14).rsi().iloc[-1]
             ema20_15m = ta.trend.EMAIndicator(close_15m, window=20).ema_indicator().iloc[-1]
             ema50_15m = ta.trend.EMAIndicator(close_15m, window=50).ema_indicator().iloc[-1]
-            ema_up_15m = ema20_15m > ema50_15m
-            if ema_up_15m:
+            if ema20_15m > ema50_15m:
                 return "BUY_5M", rsi_5m, price, atr
 
     # --- SELL in TRENDING_DOWN (uscita posizione long) ---
