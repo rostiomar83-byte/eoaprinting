@@ -1,5 +1,5 @@
 """
-CryptoBot Omar v4.1 — Professional Edition
+CryptoBot Omar v4.4 — Professional Edition
 Engines attivi:
   1. MultiTF 5m/15m — trend following + 4H EMA filter (TRENDING_UP)
   2. TRIX+ADX 15m   — trend following + 4H EMA + volume 1.2× (TRENDING_UP/RANGING)
@@ -44,7 +44,7 @@ from market_regime import get_regime
 from strategy_multiTF import get_signal_multitf
 from strategy_trix import get_signal_trix
 from strategy_meanrev import get_signal_mr
-from mean_rev_manager import MeanRevManager
+from mean_rev_manager import MeanRevManager, MR_AMOUNT_USD
 from risk_manager import RiskManager
 import telegram_bot as tg
 
@@ -290,7 +290,7 @@ def _cmd_pnl():
 def _cmd_status():
     cds = [s for s, t in multitf_cooldown.items() if datetime.now() < t]
     guard = "🛡️ RISK-OFF" if _last_risk_off else "🟢 normale"
-    tg.send_message(f"🤖 CryptoBot Omar v4.3 attivo\n"
+    tg.send_message(f"🤖 CryptoBot Omar v4.4 attivo\n"
                     f"  Simboli: {len(SYMBOLS)}\n"
                     f"  Pos aperte: {len(positions) + len(mr_manager.positions)}\n"
                     f"  Daily PnL: {risk_manager.daily_pnl:+.2f}$\n"
@@ -321,13 +321,13 @@ _last_heartbeat_hour = -1
 _last_risk_off = False   # stato precedente del Volatility Guard (per alert una-tantum)
 
 log("=" * 60)
-log(f"CryptoBot Omar v4.3 AVVIATO — {len(SYMBOLS)} simboli")
+log(f"CryptoBot Omar v4.4 AVVIATO — {len(SYMBOLS)} simboli")
 log(f"Engines: MultiTF+4H | TRIX+ADX+4H | MeanRev+BB+FastRSI")
 log(f"Sizing su ATR 1h | R:R 1:3.3 | PartialTP+fee gate | "
     f"TimeFilter {TRADE_HOUR_START}-{TRADE_HOUR_END}UTC | PnL netto fee | "
     f"VolGuard {VOL_SPIKE_MULT}×")
 log("=" * 60)
-tg.send_message(f"🚀 <b>CryptoBot Omar v4.3 AVVIATO</b>\n"
+tg.send_message(f"🚀 <b>CryptoBot Omar v4.4 AVVIATO</b>\n"
                 f"Simboli: {', '.join(SYMBOLS)}\n"
                 f"Sizing ATR 1h | R:R 1:3.3 | PnL netto fee | 🛡️ Volatility Guard")
 
@@ -506,6 +506,14 @@ while _running:
                         continue
                     sl_tp = mr_manager.check_sl_tp(symbol, current_price)
                     if sl_tp in ("SL", "TP", "TIMEOUT"):
+                        mr_pos = mr_manager.get_position(symbol)
+                        mr_qty = _amt(symbol, mr_pos.get("qty", 0))
+                        if mr_qty > 0:
+                            try:
+                                exchange.create_market_sell_order(symbol, mr_qty)
+                            except Exception as e:
+                                log(f"[MR SELL ERR {symbol}] {e}")
+                                tg.send_message(f"❌ MR SELL error {symbol}: {e}")
                         pnl = mr_manager.register_sell(symbol, current_price)
                         risk_manager.record_pnl(pnl)
                         emoji = "✅" if pnl >= 0 else "🔴"
@@ -537,6 +545,14 @@ while _running:
                         cp = ticker["last"]
                     except Exception:
                         cp = price_mr
+                    mr_pos = mr_manager.get_position(symbol)
+                    mr_qty = _amt(symbol, mr_pos.get("qty", 0))
+                    if mr_qty > 0:
+                        try:
+                            exchange.create_market_sell_order(symbol, mr_qty)
+                        except Exception as e:
+                            log(f"[MR SELL ERR {symbol}] {e}")
+                            tg.send_message(f"❌ MR SELL error {symbol}: {e}")
                     pnl = mr_manager.register_sell(symbol, cp)
                     risk_manager.record_pnl(pnl)
                     emoji = "✅" if pnl >= 0 else "🔴"
@@ -556,11 +572,18 @@ while _running:
                     else:
                         ok_mr, reason_mr = mr_manager.can_buy(bal, symbol)
                         if ok_mr and risk_manager.check_exposure(equity, open_value):
-                            mr_manager.register_buy(symbol, price_mr, atr_h)
-                            tg.send_message(f"🟢 MR BUY {symbol}\n"
-                                            f"  RSI: {rsi_mr:.1f}  BB touch ✓  FastRSI ✓\n"
-                                            f"  SL: {price_mr - 1.0*atr_h:.4f}  TP: {price_mr + 2.5*atr_h:.4f}")
-                            log(f"[MR BUY] {symbol} RSI={rsi_mr:.1f} price={price_mr:.4f}")
+                            mr_qty = _amt(symbol, MR_AMOUNT_USD / price_mr)
+                            try:
+                                exchange.create_market_buy_order(symbol, mr_qty)
+                                mr_manager.register_buy(symbol, price_mr, atr_h)
+                                tg.send_message(f"🟢 MR BUY {symbol}\n"
+                                                f"  RSI: {rsi_mr:.1f}  BB touch ✓  FastRSI ✓\n"
+                                                f"  Qty: {mr_qty:.4f}  ~{MR_AMOUNT_USD}$\n"
+                                                f"  SL: {price_mr - 1.0*atr_h:.4f}  TP: {price_mr + 2.5*atr_h:.4f}")
+                                log(f"[MR BUY] {symbol} RSI={rsi_mr:.1f} price={price_mr:.4f} qty={mr_qty:.4f}")
+                            except Exception as e:
+                                log(f"[MR BUY ERR {symbol}] {e}")
+                                tg.send_message(f"❌ MR BUY error {symbol}: {e}")
                         else:
                             log(f"[MR SKIP {symbol}] {reason_mr}")
 
