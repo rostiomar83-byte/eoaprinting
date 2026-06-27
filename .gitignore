@@ -1,0 +1,32 @@
+# --- Secret & credenziali (MAI committare) ---
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets.json
+
+# --- Stato runtime del bot (non versionare) ---
+crypto_bot/*.log
+crypto_bot/nohup.log
+crypto_bot/watchdog.log
+crypto_bot/positions.json
+crypto_bot/mr_positions.json
+crypto_bot/risk_state.json
+crypto_bot/bot.pid
+crypto_bot/*_backup_*/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+botenv/
+.pytest_cache/
+
+# --- OS / editor ---
+.DS_Store
+*.swp
+.idea/
+.vscode/

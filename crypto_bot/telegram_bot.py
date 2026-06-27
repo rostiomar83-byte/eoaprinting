@@ -60,8 +60,15 @@ def poll_commands(handlers: dict):
             _last_update_id = upd["update_id"]
             msg = upd.get("message", {})
             txt = msg.get("text", "")
-            if txt:
-                _handle_command(txt, handlers)
+            if not txt:
+                continue
+            # Sicurezza: esegui SOLO comandi provenienti dalla chat autorizzata.
+            # Senza questo controllo chiunque scriva al bot potrebbe vedere il
+            # bilancio/posizioni o fermare il trading con /stop.
+            chat_id = str(msg.get("chat", {}).get("id", ""))
+            if TELEGRAM_CHAT_ID and chat_id != str(TELEGRAM_CHAT_ID):
+                continue
+            _handle_command(txt, handlers)
 
 
 def start_polling(handlers: dict):

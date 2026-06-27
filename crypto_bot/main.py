@@ -129,6 +129,14 @@ def _net_pnl(entry: float, exit_price: float, qty: float) -> float:
     return gross - fees
 
 
+def _amt(symbol: str, qty: float) -> float:
+    """Arrotonda la quantità alla precisione richiesta da Kraken (evita reject)."""
+    try:
+        return float(exchange.amount_to_precision(symbol, qty))
+    except Exception:
+        return qty
+
+
 def _atr_valid(atr) -> bool:
     """ATR utilizzabile: non None, non NaN, > 0. Evita posizioni senza stop."""
     return atr is not None and atr == atr and atr > 0
@@ -167,7 +175,7 @@ def _atr_1h(df) -> float:
 
 def place_buy(symbol: str, amount_usd: float, price: float, sl: float, tp: float,
               engine: str, atr: float = 0.0, regime: str = "RANGING"):
-    qty = amount_usd / price
+    qty = _amt(symbol, amount_usd / price)
     trail_mult = TRAILING_ATR_TRENDING_UP if regime == "TRENDING_UP" else TRAILING_ATR_MULT
     tp1 = price + PARTIAL_TP_ATR_MULT * atr if atr > 0 else float("inf")
     try:
@@ -202,7 +210,7 @@ def place_sell(symbol: str, reason: str):
     if not pos:
         return
     try:
-        exchange.create_market_sell_order(symbol, pos["qty"])
+        exchange.create_market_sell_order(symbol, _amt(symbol, pos["qty"]))
         ticker = exchange.fetch_ticker(symbol)
         exit_price = ticker["last"]
         pnl = _net_pnl(pos["entry_price"], exit_price, pos["qty"])
@@ -411,7 +419,7 @@ while _running:
                         if current_price >= tp1:
                             half_qty = pos["qty"] / 2
                             try:
-                                exchange.create_market_sell_order(symbol, half_qty)
+                                exchange.create_market_sell_order(symbol, _amt(symbol, half_qty))
                                 partial_pnl = _net_pnl(pos["entry_price"], current_price, half_qty)
                                 risk_manager.record_pnl(partial_pnl)
                                 pos["qty"] = half_qty
