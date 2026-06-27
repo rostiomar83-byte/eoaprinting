@@ -27,6 +27,12 @@ TRAILING_ATR_TRENDING_UP = 2.0   # trailing più largo in TRENDING_UP (respira i
 
 RSI_PERIOD = 14
 
+# Costi di esecuzione — Kraken spot, market order (taker)
+FEE_RATE = 0.0026               # 0.26% per lato → 0.52% round-trip
+# Gate anti-fee-bleed: il partial TP (2×ATR) deve lasciare ≥0.25% NETTO dopo fee.
+# Se la volatilità non basta a coprire le commissioni, il trade NON si apre.
+MIN_TP1_NET_PCT = 0.0025
+
 DCA_AMOUNT_USDT = 10             # DCA lunedì mattina
 
 TRADE_HOUR_START = 7             # no nuovi ingressi 23:00-07:00 UTC

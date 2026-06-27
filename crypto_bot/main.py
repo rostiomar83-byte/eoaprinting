@@ -37,6 +37,7 @@ from config import (
     TRADE_AMOUNT_TRENDING_UP, TRADE_AMOUNT_RANGING,
     LOG_FILE, DCA_AMOUNT_USDT, STATE_FILE,
     TRADE_HOUR_START, TRADE_HOUR_END,
+    FEE_RATE, MIN_TP1_NET_PCT, MAX_OPEN_POSITIONS,
 )
 from market_regime import get_regime
 from strategy_multiTF import get_signal_multitf
@@ -121,6 +122,37 @@ def get_balance() -> float:
         return 0.0
 
 
+def _net_pnl(entry: float, exit_price: float, qty: float) -> float:
+    """PnL al netto delle commissioni Kraken (taker su entrambi i lati)."""
+    gross = (exit_price - entry) * qty
+    fees = (entry + exit_price) * qty * FEE_RATE
+    return gross - fees
+
+
+def _atr_valid(atr) -> bool:
+    """ATR utilizzabile: non None, non NaN, > 0. Evita posizioni senza stop."""
+    return atr is not None and atr == atr and atr > 0
+
+
+def _edge_ok(atr: float, price: float) -> bool:
+    """
+    True se il partial TP (PARTIAL_TP_ATR_MULT×ATR) copre il round-trip fee
+    + un margine netto minimo. Blocca gli scalp che bruciano solo commissioni.
+    """
+    if not _atr_valid(atr) or price <= 0:
+        return False
+    tp1_move_pct = (PARTIAL_TP_ATR_MULT * atr) / price
+    required = 2 * FEE_RATE + MIN_TP1_NET_PCT
+    return tp1_move_pct >= required
+
+
+def _open_value() -> float:
+    """Valore reale delle posizioni aperte (multi + MR), a prezzi d'ingresso."""
+    multi = sum(p["qty"] * p["entry_price"] for p in positions.values())
+    mr = sum(p["qty"] * p["entry_price"] for p in mr_manager.positions.values())
+    return multi + mr
+
+
 def place_buy(symbol: str, amount_usd: float, price: float, sl: float, tp: float,
               engine: str, atr: float = 0.0, regime: str = "RANGING"):
     qty = amount_usd / price
@@ -161,7 +193,7 @@ def place_sell(symbol: str, reason: str):
         exchange.create_market_sell_order(symbol, pos["qty"])
         ticker = exchange.fetch_ticker(symbol)
         exit_price = ticker["last"]
-        pnl = (exit_price - pos["entry_price"]) * pos["qty"]
+        pnl = _net_pnl(pos["entry_price"], exit_price, pos["qty"])
         risk_manager.record_pnl(pnl)
 
         # Cooldown 60min dopo SL perdente: evita re-entry immediato sullo stesso asset
@@ -199,10 +231,10 @@ def _cmd_positions():
         tg.send_message("Nessuna posizione aperta.")
         return
     lines = []
-    for sym, p in positions.items():
+    for sym, p in list(positions.items()):
         half = " [50% venduto]" if p.get("half_sold") else ""
         lines.append(f"  [{p['engine']}] {sym} @ {p['entry_price']:.4f}{half}")
-    for sym, p in mr_manager.positions.items():
+    for sym, p in list(mr_manager.positions.items()):
         lines.append(f"  [MR] {sym} @ {p['entry_price']:.4f}")
     tg.send_message("📊 Posizioni aperte:\n" + "\n".join(lines))
 
@@ -308,7 +340,8 @@ while _running:
             continue
 
         bal = get_balance()
-        open_value = len(positions) * TRADE_AMOUNT_USDT + len(mr_manager.positions) * 20
+        open_value = _open_value()
+        equity = bal + open_value   # esposizione misurata su equity totale, non solo free
 
         # Filtro orario: no nuovi ingressi 23:00-07:00 UTC
         in_trading_hours = TRADE_HOUR_START <= now_utc.hour < TRADE_HOUR_END
@@ -355,21 +388,23 @@ while _running:
                     atr_val = pos.get("atr", 0)
 
                     # Partial TP: vendi 50% a TP1, sposta SL a breakeven
-                    if not pos.get("half_sold", False) and atr_val > 0:
+                    if not pos.get("half_sold", False) and _atr_valid(atr_val):
                         tp1 = pos.get("tp1", float("inf"))
                         if current_price >= tp1:
                             half_qty = pos["qty"] / 2
                             try:
                                 exchange.create_market_sell_order(symbol, half_qty)
-                                partial_pnl = (current_price - pos["entry_price"]) * half_qty
+                                partial_pnl = _net_pnl(pos["entry_price"], current_price, half_qty)
                                 risk_manager.record_pnl(partial_pnl)
                                 pos["qty"] = half_qty
                                 pos["half_sold"] = True
-                                pos["trailing_sl"] = pos["entry_price"]  # breakeven
+                                # Breakeven NETTO: copre anche le fee del round-trip
+                                breakeven = pos["entry_price"] * (1 + 2 * FEE_RATE)
+                                pos["trailing_sl"] = breakeven
                                 _save_positions()
                                 msg = (f"⚡ PARTIAL TP {pos['engine']} {symbol}\n"
                                        f"  50% @ {current_price:.4f}  Parziale: {partial_pnl:+.3f}$\n"
-                                       f"  SL spostato a breakeven: {pos['entry_price']:.4f}")
+                                       f"  SL → breakeven netto: {breakeven:.4f}")
                                 log(msg)
                                 tg.send_message(msg)
                             except Exception as e:
@@ -436,12 +471,16 @@ while _running:
                                     f"  RSI: {rsi_mr:.1f}  PnL: {pnl:+.3f}$")
                     log(f"[MR SELL] {symbol} RSI={rsi_mr:.1f} PnL={pnl:+.3f}$")
 
-                elif sig_mr == "BUY_MR" and not has_pos_mr:
-                    if btc_regime == "TRENDING_DOWN" and symbol != "BTC/USD" and len(mr_manager.positions) >= 2:
+                elif sig_mr == "BUY_MR" and not has_pos_mr and not has_pos_multi:
+                    if not _atr_valid(atr_mr):
+                        log(f"[MR SKIP {symbol}] ATR non valido")
+                    elif not _edge_ok(atr_mr, price_mr):
+                        log(f"[MR SKIP {symbol}] edge troppo piccolo: TP non copre fee 0.52%")
+                    elif btc_regime == "TRENDING_DOWN" and symbol != "BTC/USD" and len(mr_manager.positions) >= 2:
                         log(f"[MR SKIP {symbol}] BTC TRENDING_DOWN — anti-correlazione")
                     else:
                         ok_mr, reason_mr = mr_manager.can_buy(bal, symbol)
-                        if ok_mr and risk_manager.check_exposure(bal, open_value):
+                        if ok_mr and risk_manager.check_exposure(equity, open_value):
                             mr_manager.register_buy(symbol, price_mr, atr_mr)
                             tg.send_message(f"🟢 MR BUY {symbol}\n"
                                             f"  RSI: {rsi_mr:.1f}  BB touch ✓  FastRSI ✓\n"
@@ -457,8 +496,10 @@ while _running:
                     sig_trix, trix_val, price_trix, atr_trix = get_signal_trix(
                         exchange, symbol, has_pos_multi, regime, above_4h_ema
                     )
-                    if sig_trix == "BUY_TRIX" and not has_pos_multi and not in_cooldown:
-                        if risk_manager.check_exposure(bal, open_value) and len(positions) < 2:
+                    if (sig_trix == "BUY_TRIX" and not has_pos_multi and not has_pos_mr
+                            and not in_cooldown and _atr_valid(atr_trix)
+                            and _edge_ok(atr_trix, price_trix)):
+                        if risk_manager.check_exposure(equity, open_value) and len(positions) < MAX_OPEN_POSITIONS:
                             sl = price_trix - ATR_SL_MULT * atr_trix
                             tp = price_trix + ATR_TP_MULT * atr_trix
                             place_buy(symbol, trade_amt, price_trix, sl, tp, "TRIX", atr_trix, regime)
@@ -472,8 +513,10 @@ while _running:
                 rsi_str = f"{rsi_mtf:.1f}" if rsi_mtf is not None else "N/A"
                 log(f"[{symbol}] MultiTF={sig_mtf} RSI={rsi_str}")
 
-                if sig_mtf in ("BUY_5M", "BUY_15M") and not has_pos_multi and not in_cooldown:
-                    if risk_manager.check_exposure(bal, open_value) and len(positions) < 2:
+                if (sig_mtf in ("BUY_5M", "BUY_15M") and not has_pos_multi and not has_pos_mr
+                        and not in_cooldown and _atr_valid(atr_mtf)
+                        and _edge_ok(atr_mtf, price_mtf)):
+                    if risk_manager.check_exposure(equity, open_value) and len(positions) < MAX_OPEN_POSITIONS:
                         sl = price_mtf - ATR_SL_MULT * atr_mtf
                         tp = price_mtf + ATR_TP_MULT * atr_mtf
                         place_buy(symbol, trade_amt, price_mtf, sl, tp, sig_mtf, atr_mtf, regime)

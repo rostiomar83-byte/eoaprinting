@@ -10,7 +10,7 @@ import json
 import os
 from datetime import datetime, timedelta
 
-from config import MR_STATE_FILE
+from config import MR_STATE_FILE, FEE_RATE
 
 MR_AMOUNT_USD = 20
 MR_ATR_SL = 1.0
@@ -98,7 +98,9 @@ class MeanRevManager:
             return 0.0
 
         qty = pos["qty"]
-        pnl = (price - pos["entry_price"]) * qty
+        gross = (price - pos["entry_price"]) * qty
+        fees = (pos["entry_price"] + price) * qty * FEE_RATE
+        pnl = gross - fees   # PnL netto commissioni Kraken
 
         self.total_pnl += pnl
 
