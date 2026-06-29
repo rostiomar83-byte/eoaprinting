@@ -46,6 +46,7 @@ from strategy_trix import get_signal_trix
 from strategy_meanrev import get_signal_mr
 from mean_rev_manager import MeanRevManager, MR_AMOUNT_USD
 from risk_manager import RiskManager
+from stats import record_trade, compute_stats
 import telegram_bot as tg
 
 # ------------------------------------------------------------------ #
@@ -214,6 +215,7 @@ def place_buy(symbol: str, amount_usd: float, price: float, sl: float, tp: float
             "trailing_mult": trail_mult,
             "atr": atr,
             "half_sold": False,
+            "regime": regime,
         }
         msg = (f"✅ BUY {engine} {symbol}\n"
                f"  Prezzo: {price:.4f}\n"
@@ -243,6 +245,9 @@ def place_sell(symbol: str, reason: str):
             multitf_cooldown[symbol] = datetime.now() + timedelta(minutes=MULTITF_COOLDOWN_MIN)
             log(f"[COOLDOWN] {symbol} bloccato {MULTITF_COOLDOWN_MIN}min fino a "
                 f"{multitf_cooldown[symbol].strftime('%H:%M')}")
+
+        record_trade(symbol, pos["engine"], reason, pos["entry_price"],
+                     exit_price, pos["qty"], pnl, pos.get("regime", ""))
 
         emoji = "✅" if pnl >= 0 else "🔴"
         msg = (f"{emoji} SELL {pos['engine']} {symbol} [{reason}]\n"
@@ -346,6 +351,13 @@ def _cmd_risk():
     )
 
 
+def _cmd_stats():
+    try:
+        tg.send_message(compute_stats())
+    except Exception as e:
+        tg.send_message(f"❌ Errore statistiche: {e}")
+
+
 def _cmd_help():
     paused = "⏸ IN PAUSA" if _paused else "▶️ attivo"
     tg.send_message(
@@ -353,6 +365,7 @@ def _cmd_help():
         "/balance — Saldo USDT + PnL giornaliero/settimanale\n"
         "/positions — Posizioni aperte\n"
         "/pnl — PnL dettagliato\n"
+        "/stats — Statistiche complete (win rate, per motore/simbolo/ora)\n"
         "/status — Stato bot e Volatility Guard\n"
         "/risk — Esposizione e limiti di rischio\n"
         "/log — Ultime 20 righe del log\n"
@@ -367,6 +380,7 @@ tg.start_polling({
     "/balance": _cmd_balance,
     "/positions": _cmd_positions,
     "/pnl": _cmd_pnl,
+    "/stats": _cmd_stats,
     "/status": _cmd_status,
     "/risk": _cmd_risk,
     "/log": _cmd_log,
@@ -545,6 +559,9 @@ while _running:
                                 exchange.create_market_sell_order(symbol, _amt(symbol, half_qty))
                                 partial_pnl = _net_pnl(pos["entry_price"], current_price, half_qty)
                                 risk_manager.record_pnl(partial_pnl)
+                                record_trade(symbol, pos["engine"], "PARTIAL_TP",
+                                             pos["entry_price"], current_price, half_qty,
+                                             partial_pnl, pos.get("regime", ""))
                                 pos["qty"] = half_qty
                                 pos["half_sold"] = True
                                 # Breakeven NETTO: copre anche le fee del round-trip
@@ -592,6 +609,8 @@ while _running:
                                 tg.send_message(f"❌ MR SELL error {symbol}: {e}")
                         pnl = mr_manager.register_sell(symbol, current_price)
                         risk_manager.record_pnl(pnl)
+                        record_trade(symbol, "MR", sl_tp, mr_pos.get("entry_price", 0),
+                                     current_price, mr_pos.get("qty", 0), pnl, regime)
                         emoji = "✅" if pnl >= 0 else "🔴"
                         tg.send_message(f"{emoji} MR {sl_tp} {symbol}\n"
                                         f"  PnL: {pnl:+.3f}$")
@@ -631,6 +650,8 @@ while _running:
                             tg.send_message(f"❌ MR SELL error {symbol}: {e}")
                     pnl = mr_manager.register_sell(symbol, cp)
                     risk_manager.record_pnl(pnl)
+                    record_trade(symbol, "MR", "SELL_MR", mr_pos.get("entry_price", 0),
+                                 cp, mr_pos.get("qty", 0), pnl, regime, rsi_mr)
                     emoji = "✅" if pnl >= 0 else "🔴"
                     tg.send_message(f"{emoji} MR EXIT {symbol}\n"
                                     f"  RSI: {rsi_mr:.1f}  PnL: {pnl:+.3f}$")

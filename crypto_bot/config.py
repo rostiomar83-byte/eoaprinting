@@ -52,3 +52,4 @@ LOOP_SLEEP_SECONDS = 60
 LOG_FILE = os.path.expanduser("~/crypto_bot/bot.log")
 STATE_FILE = os.path.expanduser("~/crypto_bot/positions.json")
 MR_STATE_FILE = os.path.expanduser("~/crypto_bot/mr_positions.json")
+TRADES_FILE = os.path.expanduser("~/crypto_bot/trades.jsonl")  # diario strutturato (1 trade per riga)
