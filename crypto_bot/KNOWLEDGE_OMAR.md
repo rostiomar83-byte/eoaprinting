@@ -5,7 +5,7 @@
 > di agire**. La verità è una sola: il repo GitHub `claude/crypto-bot-progress-jxxhty`
 > + il VM che gira da quel repo.
 
-Ultimo aggiornamento: **v4.6** — 2026-06-30
+Ultimo aggiornamento: **v4.7** — 2026-06-30
 
 ---
 
@@ -48,9 +48,10 @@ Trend following su 5m e 15m + filtro 4H EMA50. **Opera SOLO in TRENDING_UP** (da
 TRIX + ADX + 4H EMA + volume 1.2×. **Opera SOLO in TRENDING_UP** (da v4.5).
 
 ### 3. Mean Reversion — il motore vincente
-RSI + tocco banda Bollinger inferiore + Fast RSI(7). Opera in RANGING e
-TRENDING_DOWN. **È il motore che rende di più in mercato laterale (WR ~83%).**
+RSI + tocco banda Bollinger inferiore + Fast RSI(7). **Opera SOLO in RANGING** (da v4.7).
+**Bloccato anche se BTC è TRENDING_DOWN** (blocco globale aggiunto in v4.7).
 Da v4.4 piazza **ordini reali** (prima era virtuale/paper).
+Le uscite SELL_MR su posizioni già aperte funzionano in qualsiasi regime.
 
 ---
 
@@ -89,9 +90,12 @@ BREAKOUT_ONLY_TRENDING_UP = True     # breakout solo in TRENDING_UP (v4.5)
 5. **Time filter**: niente ingressi 23:00-07:00 UTC (sessione asiatica, spread alti).
 6. **Cooldown 60min** dopo uno stop loss perdente sullo stesso asset.
 7. **Regime gate** (v4.5): breakout solo in TRENDING_UP; in RANGING solo Mean Reversion.
-8. **PnL netto fee**: ogni PnL è calcolato al netto delle commissioni reali.
-9. **Limiti persistenti**: daily/weekly loss sopravvivono ai riavvii (risk_state.json).
-10. **Anti-fantasma** (v4.6): stato locale sincronizzato col conto Kraken reale (vedi sotto).
+8. **MR gate** (v4.7): BUY_MR solo se regime locale == RANGING E BTC non è TRENDING_DOWN.
+   Motivo: in RANGING con BTC in downtrend le altcoin continuano a scendere ("catching
+   falling knives") — i dati lo hanno dimostrato (WR MR crollato a 42%, SOL 0% WR).
+9. **PnL netto fee**: ogni PnL è calcolato al netto delle commissioni reali.
+10. **Limiti persistenti**: daily/weekly loss sopravvivono ai riavvii (risk_state.json).
+11. **Anti-fantasma** (v4.6): stato locale sincronizzato col conto Kraken reale (vedi sotto).
 
 ---
 
@@ -158,6 +162,7 @@ Processi doppi = ordini duplicati sullo stesso conto = problema reale.
 | **v4.4** | Mean Reversion → **ordini reali** su Kraken (era virtuale). Cache 4H EMA (anti rate-limit). Comandi /log /pause /resume /risk. Stats engine + journaling /stats |
 | **v4.5** | **Breakout solo in TRENDING_UP** (decisione data-driven dai /stats: breakout 0% WR in RANGING, MR 83%) |
 | **v4.6** | **Anti posizione/monete fantasma**: BUY registra solo con ID ordine valido; SELL MR chiude lo stato solo se la vendita ha successo (altrimenti riprova) |
+| **v4.7** | **MR gate doppio**: BUY_MR solo in RANGING + BTC TRENDING_DOWN = blocco totale MR. Risolve il WR MR crollato a 42% (SOL 0%, ETH 33%) durante discesa BTC. Eliminato il ramo TRENDING_DOWN nell'entrata MR (era catching falling knives). |
 
 ---
 
@@ -170,6 +175,11 @@ Processi doppi = ordini duplicati sullo stesso conto = problema reale.
 - **Separazione regime↔strategia** (v4.5): i dati reali hanno mostrato che i
   breakout perdono in RANGING (rotture finte = whipsaw). Ogni motore lavora solo
   dove ha edge. Reversibile via flag `BREAKOUT_ONLY_TRENDING_UP`.
+- **MR ≠ buy any dip** (v4.7): il Mean Reversion ha senso solo quando il mercato
+  oscilla attorno a un equilibrio (RANGING). Se BTC scende, ogni rimbalzo locale è
+  un'illusione — il vero trend è down. I dati (MR WR 83% → 42% in 3 giorni di
+  BTC in calo) hanno confermato: il motivo delle perdite non era la strategia MR in
+  sé, ma il contesto macro sbagliato in cui veniva usata.
 - **Decidere coi dati, non con l'intuizione**: niente cambi di strategia su 1 trade;
   agire quando c'è tesi forte + dati coerenti + azione conservativa.
 
@@ -184,16 +194,23 @@ Processi doppi = ordini duplicati sullo stesso conto = problema reale.
 2. **Processi doppi = ordini duplicati.** Sempre 1 watchdog + 1 main.py.
 3. **Fuso orario:** i log usano l'ora locale del VM (CEST, UTC+2); i filtri orari
    lavorano in UTC. Un "NO-HOURS" alle 08:55 locali = 06:55 UTC, corretto.
+4. **Il contesto macro batte la strategia locale.** MR può avere WR 83% in
+   condizioni normali e crollare a 42% in pochi giorni se BTC scende. Il regime
+   locale (RANGING su SOL) non è sufficiente: bisogna guardare il quadro globale
+   (BTC TRENDING_DOWN = stop MR su tutto). Lezione appresa dalla perdita -$0.74.
 
 ---
 
 ## 🔭 Prossimi passi (da fare coi dati in mano)
 
-1. **Checkpoint /stats a ~20-30 trade**: verificare che il gate v4.5 abbia risanato
-   i numeri (breakout non più in perdita, PnL totale verde trainato da MR).
-2. **Limit order maker per MR**: paghi 0.16% invece di 0.26% (fee -38%). Da fare
+1. **Checkpoint /stats a ~20-30 trade post-v4.7**: verificare che il gate doppio
+   (RANGING only + BTC no-down) riporti MR sopra WR 65%+. Se BTC torna laterale
+   il bot riprende a fare BUY_MR normalmente.
+2. **Verificare che v4.5 abbia risanato i breakout**: dopo 10+ trade TRENDING_UP,
+   controllare se MultiTF/TRIX hanno WR accettabile. Se no → disattivare del tutto.
+3. **Limit order maker per MR**: paghi 0.16% invece di 0.26% (fee -38%). Da fare
    con cautela (gestione fill/timeout/cancel) DOPO aver misurato col journaling se
    le fee sono davvero il problema. Lo stats engine misura il problema che i limit
    order dovrebbero risolvere.
-3. **Eventuale spegnimento motori**: se in TRENDING_UP i breakout continuano a
-   perdere, il problema non è il regime ma il motore → si disattivano del tutto.
+4. **Se BTC resta TRENDING_DOWN a lungo**: il bot starà fermo su MR. È corretto —
+   meglio non tradare che perdere. Riaprirà quando il mercato lo permette.
