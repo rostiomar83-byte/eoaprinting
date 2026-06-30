@@ -1,9 +1,9 @@
 """
-CryptoBot Omar v4.6 — Professional Edition
+CryptoBot Omar v4.7 — Professional Edition
 Engines attivi:
   1. MultiTF 5m/15m — trend following + 4H EMA filter (TRENDING_UP)
   2. TRIX+ADX 15m   — trend following + 4H EMA + volume 1.2× (TRENDING_UP/RANGING)
-  3. Mean Reversion  — RSI + BB touch + Fast RSI (RANGING + TRENDING_DOWN)
+  3. Mean Reversion  — RSI + BB touch + Fast RSI (RANGING only — v4.7)
 Miglioramenti v4.1:
   - Time filter: nessun nuovo ingresso 23:00-07:00 UTC (sessione asiatica)
   - R:R 1:3.3  (SL=1.5 ATR, TP=5 ATR)
@@ -304,7 +304,7 @@ def _cmd_status():
     cds = [s for s, t in multitf_cooldown.items() if datetime.now() < t]
     guard = "🛡️ RISK-OFF" if _last_risk_off else "🟢 normale"
     stato = "⏸ IN PAUSA" if _paused else "▶️ attivo"
-    tg.send_message(f"🤖 CryptoBot Omar v4.6 — {stato}\n"
+    tg.send_message(f"🤖 CryptoBot Omar v4.7 — {stato}\n"
                     f"  Simboli: {len(SYMBOLS)}\n"
                     f"  Pos aperte: {len(positions) + len(mr_manager.positions)}\n"
                     f"  Daily PnL: {risk_manager.daily_pnl:+.2f}$\n"
@@ -369,7 +369,7 @@ def _cmd_stats():
 def _cmd_help():
     paused = "⏸ IN PAUSA" if _paused else "▶️ attivo"
     tg.send_message(
-        f"🤖 <b>CryptoBot Omar v4.6</b> [{paused}]\n\n"
+        f"🤖 <b>CryptoBot Omar v4.7</b> [{paused}]\n\n"
         "/balance — Saldo USDT + PnL giornaliero/settimanale\n"
         "/positions — Posizioni aperte\n"
         "/pnl — PnL dettagliato\n"
@@ -408,16 +408,18 @@ _last_heartbeat_hour = -1
 _last_risk_off = False   # stato precedente del Volatility Guard (per alert una-tantum)
 
 log("=" * 60)
-log(f"CryptoBot Omar v4.6 AVVIATO — {len(SYMBOLS)} simboli")
+log(f"CryptoBot Omar v4.7 AVVIATO — {len(SYMBOLS)} simboli")
 log(f"Engines: MultiTF+4H | TRIX+ADX+4H | MeanRev+BB+FastRSI")
 log(f"Sizing su ATR 1h | R:R 1:3.3 | PartialTP+fee gate | "
     f"TimeFilter {TRADE_HOUR_START}-{TRADE_HOUR_END}UTC | PnL netto fee | "
     f"VolGuard {VOL_SPIKE_MULT}×")
 gate_txt = "Breakout SOLO in TRENDING_UP (RANGING=solo MeanRev)" if BREAKOUT_ONLY_TRENDING_UP else "Breakout in tutti i regimi"
 log(f"Regime gate: {gate_txt}")
+log(f"MR gate v4.7: BUY solo in RANGING + BTC TRENDING_DOWN = blocco totale MR")
 log("=" * 60)
-tg.send_message(f"🚀 <b>CryptoBot Omar v4.6 AVVIATO</b>\n"
+tg.send_message(f"🚀 <b>CryptoBot Omar v4.7 AVVIATO</b>\n"
                 f"Simboli: {', '.join(SYMBOLS)}\n"
+                f"MR: RANGING only | BTC down = stop MR\n"
                 f"Sizing ATR 1h | R:R 1:3.3 | PnL netto fee | 🛡️ Volatility Guard")
 
 
@@ -645,7 +647,8 @@ while _running:
                 trade_amt = TRADE_AMOUNT_TRENDING_UP if regime == "TRENDING_UP" else TRADE_AMOUNT_RANGING
 
                 # -------------------------------------------------- #
-                # Engine 3: Mean Reversion (RANGING + TRENDING_DOWN)  #
+                # Engine 3: Mean Reversion (solo RANGING — v4.7)      #
+                # BUY bloccato anche se BTC è TRENDING_DOWN globale.  #
                 # -------------------------------------------------- #
                 sig_mr, rsi_mr, price_mr, atr_mr = get_signal_mr(
                     exchange, symbol, has_pos_mr, regime
@@ -686,8 +689,10 @@ while _running:
                         log(f"[MR SKIP {symbol}] ATR 1h non valido")
                     elif not _edge_ok(atr_h, price_mr):
                         log(f"[MR SKIP {symbol}] edge troppo piccolo: TP non copre fee 0.52%")
-                    elif btc_regime == "TRENDING_DOWN" and symbol != "BTC/USD" and len(mr_manager.positions) >= 2:
-                        log(f"[MR SKIP {symbol}] BTC TRENDING_DOWN — anti-correlazione")
+                    elif btc_regime == "TRENDING_DOWN":
+                        # BTC in downtrend globale: anche le altcoin in RANGING locale
+                        # tendono a continuare a scendere — nessun nuovo MR BUY.
+                        log(f"[MR SKIP {symbol}] BTC TRENDING_DOWN — nessun nuovo MR")
                     else:
                         ok_mr, reason_mr = mr_manager.can_buy(bal, symbol)
                         if ok_mr and risk_manager.check_exposure(equity, open_value):
@@ -765,4 +770,4 @@ while _running:
     time.sleep(LOOP_SLEEP_SECONDS)
 
 log("Bot fermato.")
-tg.send_message("⛔ CryptoBot Omar v4.1 fermato.")
+tg.send_message("⛔ CryptoBot Omar v4.7 fermato.")

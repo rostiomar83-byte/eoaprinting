@@ -3,7 +3,8 @@ Mean Reversion strategy con:
 - BB lower band touch come filtro entrata (riduce falsi segnali)
 - Fast RSI(7) come conferma secondaria
 - Cooldown 90 min dopo stop loss (gestito in mean_rev_manager.py)
-- Regime: RANGING (normale) o TRENDING_DOWN (soglie più conservative)
+- Regime: SOLO RANGING — nessun BUY in TRENDING_DOWN (catching falling knives)
+  TRENDING_DOWN: le uscite MR esistenti sono ancora gestite (SELL_MR ok)
 """
 
 from datetime import datetime
@@ -36,7 +37,13 @@ def get_signal_mr(exchange, symbol: str, has_position: bool, regime: str = None)
     Returns (signal, rsi, price, atr)
     signal: 'BUY_MR', 'SELL_MR', 'HOLD'
     """
-    if regime not in ("RANGING", "TRENDING_DOWN"):
+    # BUY_MR solo in RANGING. In TRENDING_DOWN il mercato scende → comprare i dip
+    # è "prendere coltelli al volo" (catching falling knives) → stop sistematico.
+    # Le uscite (SELL_MR) sulle posizioni già aperte vengono comunque gestite.
+    is_ranging = (regime == "RANGING")
+
+    # Carica i dati solo se regime utile O se abbiamo una posizione da uscire
+    if not is_ranging and not has_position:
         return "HOLD", None, None, None
 
     df = _fetch_ohlcv(exchange, symbol)
@@ -67,29 +74,27 @@ def get_signal_mr(exchange, symbol: str, has_position: bool, regime: str = None)
     except Exception:
         pass
 
-    in_downtrend = (regime == "TRENDING_DOWN")
     is_weekend = datetime.now().weekday() >= 5
 
-    # --- USCITA ---
-    mr_exit_threshold = MR_RSI_EXIT_TRENDING if in_downtrend else MR_RSI_EXIT
-    # Uscita anticipata: RSI sopra soglia OPPURE prezzo tocca BB mid in downtrend
+    # --- USCITA (valida in qualsiasi regime se abbiamo posizione aperta) ---
     if has_position:
+        # In TRENDING_DOWN uscita più rapida: soglia più bassa + BB mid come trigger
+        in_downtrend = (regime == "TRENDING_DOWN")
+        mr_exit_threshold = MR_RSI_EXIT_TRENDING if in_downtrend else MR_RSI_EXIT
         rsi_exit_ok = rsi >= mr_exit_threshold
         fast_exit_ok = rsi_fast >= RSI_FAST_OVERBOUGHT
         bb_exit_ok = in_downtrend and price >= bb_mid
         if rsi_exit_ok or fast_exit_ok or bb_exit_ok:
             return "SELL_MR", rsi, price, atr
 
-    # --- ENTRATA ---
+    # --- ENTRATA: solo in RANGING ---
+    if not is_ranging:
+        return "HOLD", rsi, price, atr
+
     if has_position:
         return "HOLD", rsi, price, atr
 
-    if in_downtrend:
-        rsi_threshold = MR_RSI_BUY_TRENDING
-    elif is_weekend:
-        rsi_threshold = MR_RSI_BUY_WEEKEND
-    else:
-        rsi_threshold = MR_RSI_BUY
+    rsi_threshold = MR_RSI_BUY_WEEKEND if is_weekend else MR_RSI_BUY
 
     rsi_ok = rsi <= rsi_threshold
     fast_rsi_ok = rsi_fast <= RSI_FAST_OVERSOLD  # Fast RSI conferma oversold
