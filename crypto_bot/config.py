@@ -47,6 +47,14 @@ VOL_GUARD_ENABLED = True
 VOL_SPIKE_MULT = 1.8            # 1.8× la volatilità media → blocco ingressi
 VOL_BASELINE_PERIODS = 50      # finestra (candele 1h) per la media ATR%
 
+# --- Separazione regime ↔ strategia (data-driven) ---
+# I dati reali (/stats) mostrano che i motori breakout (MultiTF, TRIX) perdono
+# sistematicamente in mercato RANGING (0% win rate) mentre il Mean Reversion
+# vince (83%). In un laterale le "rotture" sono finte → whipsaw.
+# Con questo flag i motori breakout entrano SOLO in TRENDING_UP, dove hanno edge.
+# In RANGING lavora solo il Mean Reversion. Reversibile: metti False per tornare indietro.
+BREAKOUT_ONLY_TRENDING_UP = True
+
 LOOP_SLEEP_SECONDS = 60
 
 LOG_FILE = os.path.expanduser("~/crypto_bot/bot.log")

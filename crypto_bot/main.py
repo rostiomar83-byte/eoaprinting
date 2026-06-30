@@ -1,5 +1,5 @@
 """
-CryptoBot Omar v4.4 — Professional Edition
+CryptoBot Omar v4.5 — Professional Edition
 Engines attivi:
   1. MultiTF 5m/15m — trend following + 4H EMA filter (TRENDING_UP)
   2. TRIX+ADX 15m   — trend following + 4H EMA + volume 1.2× (TRENDING_UP/RANGING)
@@ -39,6 +39,7 @@ from config import (
     TRADE_HOUR_START, TRADE_HOUR_END,
     FEE_RATE, MIN_TP1_NET_PCT, MAX_OPEN_POSITIONS,
     VOL_GUARD_ENABLED, VOL_SPIKE_MULT, VOL_BASELINE_PERIODS,
+    BREAKOUT_ONLY_TRENDING_UP,
 )
 from market_regime import get_regime
 from strategy_multiTF import get_signal_multitf
@@ -296,7 +297,7 @@ def _cmd_status():
     cds = [s for s, t in multitf_cooldown.items() if datetime.now() < t]
     guard = "🛡️ RISK-OFF" if _last_risk_off else "🟢 normale"
     stato = "⏸ IN PAUSA" if _paused else "▶️ attivo"
-    tg.send_message(f"🤖 CryptoBot Omar v4.4 — {stato}\n"
+    tg.send_message(f"🤖 CryptoBot Omar v4.5 — {stato}\n"
                     f"  Simboli: {len(SYMBOLS)}\n"
                     f"  Pos aperte: {len(positions) + len(mr_manager.positions)}\n"
                     f"  Daily PnL: {risk_manager.daily_pnl:+.2f}$\n"
@@ -361,7 +362,7 @@ def _cmd_stats():
 def _cmd_help():
     paused = "⏸ IN PAUSA" if _paused else "▶️ attivo"
     tg.send_message(
-        f"🤖 <b>CryptoBot Omar v4.4</b> [{paused}]\n\n"
+        f"🤖 <b>CryptoBot Omar v4.5</b> [{paused}]\n\n"
         "/balance — Saldo USDT + PnL giornaliero/settimanale\n"
         "/positions — Posizioni aperte\n"
         "/pnl — PnL dettagliato\n"
@@ -400,13 +401,15 @@ _last_heartbeat_hour = -1
 _last_risk_off = False   # stato precedente del Volatility Guard (per alert una-tantum)
 
 log("=" * 60)
-log(f"CryptoBot Omar v4.4 AVVIATO — {len(SYMBOLS)} simboli")
+log(f"CryptoBot Omar v4.5 AVVIATO — {len(SYMBOLS)} simboli")
 log(f"Engines: MultiTF+4H | TRIX+ADX+4H | MeanRev+BB+FastRSI")
 log(f"Sizing su ATR 1h | R:R 1:3.3 | PartialTP+fee gate | "
     f"TimeFilter {TRADE_HOUR_START}-{TRADE_HOUR_END}UTC | PnL netto fee | "
     f"VolGuard {VOL_SPIKE_MULT}×")
+gate_txt = "Breakout SOLO in TRENDING_UP (RANGING=solo MeanRev)" if BREAKOUT_ONLY_TRENDING_UP else "Breakout in tutti i regimi"
+log(f"Regime gate: {gate_txt}")
 log("=" * 60)
-tg.send_message(f"🚀 <b>CryptoBot Omar v4.4 AVVIATO</b>\n"
+tg.send_message(f"🚀 <b>CryptoBot Omar v4.5 AVVIATO</b>\n"
                 f"Simboli: {', '.join(SYMBOLS)}\n"
                 f"Sizing ATR 1h | R:R 1:3.3 | PnL netto fee | 🛡️ Volatility Guard")
 
@@ -684,10 +687,16 @@ while _running:
                         else:
                             log(f"[MR SKIP {symbol}] {reason_mr}")
 
+                # Gate regime↔strategia: i breakout entrano solo dove hanno edge.
+                # In RANGING perdono sistematicamente (vedi /stats) → solo MR lavora lì.
+                breakout_ok = (not BREAKOUT_ONLY_TRENDING_UP) or (regime == "TRENDING_UP")
+                if not breakout_ok and not has_pos_multi:
+                    log(f"[{symbol}] Breakout OFF (regime {regime}) — solo MeanRev")
+
                 # -------------------------------------------------- #
                 # Engine 2: TRIX + ADX (15m) + 4H EMA               #
                 # -------------------------------------------------- #
-                if not has_pos_multi:
+                if not has_pos_multi and breakout_ok:
                     sig_trix, trix_val, price_trix, atr_trix = get_signal_trix(
                         exchange, symbol, has_pos_multi, regime, above_4h_ema
                     )
@@ -708,7 +717,8 @@ while _running:
                 rsi_str = f"{rsi_mtf:.1f}" if rsi_mtf is not None else "N/A"
                 log(f"[{symbol}] MultiTF={sig_mtf} RSI={rsi_str}")
 
-                if (sig_mtf in ("BUY_5M", "BUY_15M") and not has_pos_multi and not has_pos_mr
+                if (sig_mtf in ("BUY_5M", "BUY_15M") and breakout_ok
+                        and not has_pos_multi and not has_pos_mr
                         and not in_cooldown and not vol_spike and _atr_valid(atr_h)
                         and _edge_ok(atr_h, price_mtf)):
                     if risk_manager.check_exposure(equity, open_value) and len(positions) < MAX_OPEN_POSITIONS:
