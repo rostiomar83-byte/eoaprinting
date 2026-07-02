@@ -5,7 +5,7 @@
 > di agire**. La verità è una sola: il repo GitHub `claude/crypto-bot-progress-jxxhty`
 > + il VM che gira da quel repo.
 
-Ultimo aggiornamento: **v4.7** — 2026-06-30
+Ultimo aggiornamento: **v4.7** — 2026-07-02
 
 ---
 
@@ -143,6 +143,18 @@ sleep 15 && pgrep -af "main.py|watchdog" && grep "AVVIATO" ~/crypto_bot/bot.log 
 **Regola d'oro:** dopo il deploy verifica sempre **1 solo watchdog + 1 solo main.py**.
 Processi doppi = ordini duplicati sullo stesso conto = problema reale.
 
+**IMPORTANTE — `~/crypto_bot` NON è un repo git.** Il `git pull` non funziona sul VM.
+I file si aggiornano SOLO con wget (vedi sopra). Il repo git esiste solo in locale
+(ambiente Claude) e su GitHub. Sul VM arrivano i file già compilati via wget.
+
+**Comando di verifica deploy:**
+```bash
+grep "v4\." ~/crypto_bot/main.py | head -2
+grep "is_ranging\|RANGING only" ~/crypto_bot/strategy_meanrev.py | head -2
+pgrep -af "main.py|watchdog"
+tail -5 ~/crypto_bot/bot.log
+```
+
 ---
 
 ## 🔐 Sicurezza
@@ -198,6 +210,71 @@ Processi doppi = ordini duplicati sullo stesso conto = problema reale.
    condizioni normali e crollare a 42% in pochi giorni se BTC scende. Il regime
    locale (RANGING su SOL) non è sufficiente: bisogna guardare il quadro globale
    (BTC TRENDING_DOWN = stop MR su tutto). Lezione appresa dalla perdita -$0.74.
+5. **Il VM non è un repo git.** `git pull` sul VM non funziona — i file vengono
+   scaricati via wget. Dopo ogni modifica al codice, usare sempre il blocco wget
+   della procedura di deploy. Il `git log` funziona solo nell'ambiente Claude locale.
+6. **Verifica sempre DOPO il deploy.** Un deploy senza verifica non è un deploy.
+   Comando minimo: `grep "vX.Y" ~/crypto_bot/main.py | head -1` per confermare
+   la versione corretta girata.
+
+---
+
+## 💼 Reddito freelance parallelo
+
+Il bot da solo non arriva a €300-500/mese con $210 di capitale. La strategia
+parallela è vendere la competenza di costruire bot su Fiverr/Upwork.
+
+**Cosa è stato creato:**
+- Repo GitHub pubblico: `rostiomar83-byte/crypto-price-alert-bot`
+  (bot di demo funzionante — CoinGecko API, /add /list /del, persistenza, multi-thread)
+- Gig Fiverr pubblicato: categoria **Trading Bots Development**
+  Pacchetti: €60 (Starter) / €170 (Full) / €400 (Pro + Deploy)
+- Gig Telegram/bot generico: €25 / €75 / €180
+- Template Upwork + Reddit r/forhire pronti in `portfolio-demos/OUTREACH_TEMPLATES.md`
+
+**Regole d'oro Fiverr:**
+- Mai promettere profitti su bot di trading — vendi la costruzione, non i guadagni
+- Prima riga della proposta SEMPRE personalizzata sul loro progetto
+- Link GitHub in ogni proposta (distingue dal 90% degli altri)
+- Primo cliente anche a prezzo ribassato → recensione 5★ → poi alza prezzi
+- Messaggi con link esterni = scam al 100% (segnala e blocca)
+
+**File di riferimento:**
+- `portfolio-demos/FIVERR_GIG_TRADING.md` — kit completo gig trading bot
+- `portfolio-demos/FIVERR_GIG.md` — kit gig Telegram/automazione generico
+- `portfolio-demos/OUTREACH_TEMPLATES.md` — proposte Upwork, Reddit, pricing
+
+---
+
+## 📊 Snapshot PnL storico
+
+| Data | Trade | WR | PnL | Note |
+|------|-------|----|-----|------|
+| ~2026-06-25 | 6 | 66.7% | +$0.51 MR | Prima snapshot MR reale (v4.4) |
+| ~2026-06-27 | 9 | 55.6% | -$1.74 BUY_5M | Breakout in RANGING → v4.5 gate |
+| 2026-06-30 | 15 | 33.3% | -$2.48 | BTC TRENDING_DOWN, MR catching knives |
+| 2026-07-02 | 16 | 31.2% | -$2.53 | Baseline pre-v4.7 (ultimo prima del fix) |
+
+**Baseline v4.7 (da usare come confronto al prossimo /stats):**
+- MR: -$0.78, 13 trade, WR 38%
+- BUY_5M: -$1.74, 3 trade, WR 0% — CONGELATO (nessun nuovo trade da v4.5)
+- SOL: 0% WR (-$1.22), ETH: 33% WR (-$1.07)
+- Ora peggiore: 02:00 UTC (-$1.58) — già risolta da time filter
+- Regime RANGING: -$1.48 (13 trade) — MR apriva anche con BTC down → v4.7
+
+---
+
+## 🚫 Strade valutate e scartate (con perché)
+
+| Strada | Perché scartata ora |
+|--------|-------------------|
+| **Dropshipping automatico** | Temu/Shein hanno distrutto i margini. Meta Ads costi triplicati. Richiede €300-1000 budget ads non disponibile. Da rivalutare con €500+ liberi. |
+| **CFD / XTrend Lite / app "Start from $10"** | Broker guadagna sullo spread, leva = rischio perdere più del capitale, nessun controllo sul codice. Opposto di quello che stiamo costruendo. |
+| **Sniper Pro Scanner (Andrei Lefter)** | Indicatore TradingView a pagamento che fa quello che il bot già fa automaticamente su 5 asset H24. Trading manuale richiede tempo che il bot elimina. |
+| **DeFi / LP / Curve / bribes** | Gas fee mangiano tutto sotto $500 di capitale. Complessità smart-contract alta. |
+| **Funding-rate arbitrage** | Richiede exchange con perp (Binance/Bybit). Con $210 i margini non coprono i costi di trasferimento. Da rivalutare a $1.000+. |
+| **Airdrop farming** | Tempo pieno, rendimento non calcolabile, gas burn. |
+| **ETH liquid staking** | Solo 2-2.7% annuo. Con $210 totali non vale la frammentazione del capitale. Rivalutare quando capitale cresce. |
 
 ---
 
@@ -214,3 +291,6 @@ Processi doppi = ordini duplicati sullo stesso conto = problema reale.
    order dovrebbero risolvere.
 4. **Se BTC resta TRENDING_DOWN a lungo**: il bot starà fermo su MR. È corretto —
    meglio non tradare che perdere. Riaprirà quando il mercato lo permette.
+5. **Freelance**: 5 proposte Upwork/giorno + Reddit r/forhire ogni giorno. Primo
+   cliente anche a prezzo ribassato → recensione → poi alza. Le recensioni
+   sbloccano il traffico organico su Fiverr.
