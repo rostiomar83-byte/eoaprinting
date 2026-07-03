@@ -11,14 +11,14 @@ from datetime import datetime
 import pandas as pd
 import ta
 
-MR_RSI_BUY = 35             # soglia RSI per RANGING
+MR_RSI_BUY = 28             # v4.8: più selettivo (era 35)
 MR_RSI_BUY_WEEKEND = 22     # weekend: mercato più volatile
-MR_RSI_BUY_TRENDING = 28    # soglia più stretta in downtrend
+MR_RSI_BUY_TRENDING = 28    # soglia in downtrend (non usata per BUY, solo riferimento)
 MR_RSI_EXIT = 58            # uscita normale
 MR_RSI_EXIT_TRENDING = 50   # uscita più veloce in downtrend
 
 RSI_FAST_PERIOD = 7
-RSI_FAST_OVERSOLD = 32      # Fast RSI: conferma oversold
+RSI_FAST_OVERSOLD = 28      # v4.8: più selettivo (era 32)
 RSI_FAST_OVERBOUGHT = 68    # Fast RSI: conferma uscita
 
 BB_WINDOW = 20
@@ -99,8 +99,11 @@ def get_signal_mr(exchange, symbol: str, has_position: bool, regime: str = None)
     rsi_ok = rsi <= rsi_threshold
     fast_rsi_ok = rsi_fast <= RSI_FAST_OVERSOLD  # Fast RSI conferma oversold
     bb_touch_ok = price <= bb_lower               # Prezzo tocca o rompe BB lower
+    # Candela di recupero: non comprare in caduta libera — aspetta prima reazione
+    prev_close = close.iloc[-2]
+    candle_recovery = (df["close"].iloc[-1] > df["open"].iloc[-1]) and (price > prev_close)
 
-    if rsi_ok and fast_rsi_ok and bb_touch_ok:
+    if rsi_ok and fast_rsi_ok and bb_touch_ok and candle_recovery:
         if vwap is None or price < vwap:
             return "BUY_MR", rsi, price, atr
 

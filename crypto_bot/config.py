@@ -1,21 +1,21 @@
 import os
 
 SYMBOLS = [
-    "BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD", "LINK/USD"
-]  # AVAX, DOGE, ADA rimossi: spread/volatilità sfavorevoli per capital ridotto
+    "BTC/USD", "ETH/USD", "SOL/USD", "LINK/USD"
+]  # v4.8: XRP rimosso (storico negativo). AVAX, DOGE, ADA rimossi precedentemente.
 
-TRADE_AMOUNT_USDT = 30           # default / fallback
-TRADE_AMOUNT_TRENDING_UP = 40    # sizing aggressivo: trend già confermato
-TRADE_AMOUNT_RANGING = 25        # sizing conservativo: laterale / segnale più debole
+TRADE_AMOUNT_USDT = 15           # default / fallback
+TRADE_AMOUNT_TRENDING_UP = 20    # v4.8: ridotto da 40 (breakout non ancora provato)
+TRADE_AMOUNT_RANGING = 15        # v4.8: ridotto da 25
 
 VOLUME_FILTER_MULT = 1.5         # era 1.2 — filtra falsi breakout su volume basso
 ADX_THRESHOLD = 25
 
 MAX_OPEN_POSITIONS = 2           # era 4 — concentrazione sui segnali migliori
-MAX_EXPOSURE_PCT = 0.70          # max 70% del capitale esposto
+MAX_EXPOSURE_PCT = 0.45          # v4.8: ridotto da 70% — protezione capitale prima
 
-MAX_DAILY_LOSS_USDT = 30
-MAX_WEEKLY_LOSS_USDT = 60
+MAX_DAILY_LOSS_USDT = 5          # v4.8: ridotto da 30 — su $210 era troppo permissivo
+MAX_WEEKLY_LOSS_USDT = 12        # v4.8: ridotto da 60
 
 HEARTBEAT_HOURS = [8, 14, 20]
 
