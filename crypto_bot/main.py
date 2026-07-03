@@ -47,7 +47,7 @@ from strategy_trix import get_signal_trix
 from strategy_meanrev import get_signal_mr
 from mean_rev_manager import MeanRevManager, MR_AMOUNT_USD
 from risk_manager import RiskManager
-from stats import record_trade, compute_stats
+from stats import record_trade, compute_stats, daily_report
 import telegram_bot as tg
 
 # ------------------------------------------------------------------ #
@@ -464,14 +464,21 @@ while _running:
         now = datetime.now()
         now_utc = datetime.utcnow()
 
-        # Heartbeat
+        # Heartbeat / Daily Report
         if now.hour in HEARTBEAT_HOURS and now.hour != _last_heartbeat_hour:
             _last_heartbeat_hour = now.hour
             bal = get_balance()
-            tg.send_message(f"💓 Heartbeat {now.strftime('%H:%M')}\n"
-                            f"  Balance: {bal:.2f}$\n"
-                            f"  Daily PnL: {risk_manager.daily_pnl:+.2f}$\n"
-                            f"  Posizioni: {len(positions) + len(mr_manager.positions)}")
+            if now.hour == 20:
+                # Report serale completo con riepilogo giornata
+                tg.send_message(daily_report(
+                    risk_manager.daily_pnl, bal,
+                    len(positions) + len(mr_manager.positions)
+                ))
+            else:
+                tg.send_message(f"💓 Heartbeat {now.strftime('%H:%M')}\n"
+                                f"  Balance: {bal:.2f}$\n"
+                                f"  Daily PnL: {risk_manager.daily_pnl:+.2f}$\n"
+                                f"  Posizioni: {len(positions) + len(mr_manager.positions)}")
 
         # DCA lunedì
         if risk_manager.should_dca():

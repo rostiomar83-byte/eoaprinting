@@ -100,6 +100,38 @@ def _fmt_pf(pf: float) -> str:
     return "∞" if pf == float("inf") else f"{pf:.2f}"
 
 
+def daily_report(daily_pnl: float, bal: float, open_pos: int) -> str:
+    """Report serale (ore 20) con riepilogo della giornata."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    trades = [t for t in load_trades() if t.get("time", "").startswith(today)]
+
+    emoji = "✅" if daily_pnl >= 0 else "🔴"
+    lines = [
+        f"{emoji} <b>Report giornaliero — {datetime.now().strftime('%d/%m/%Y')}</b>",
+        "",
+        f"PnL oggi: <b>{daily_pnl:+.2f}$</b>",
+        f"Balance USDT: <b>{bal:.2f}$</b>",
+        f"Posizioni aperte: {open_pos}",
+    ]
+
+    if trades:
+        g = _agg(trades)
+        lines.append("")
+        lines.append(f"Trade oggi: {g['n']}  ({g['wins']}W / {g['losses']}L)")
+        lines.append(f"Win rate: {g['wr']:.0f}%  |  PnL trade: {g['pnl']:+.2f}$")
+        # dettaglio per motore (solo quelli attivi oggi)
+        by_eng = _breakdown(trades, "engine")
+        if by_eng:
+            lines.append("")
+            for eng, s in sorted(by_eng.items(), key=lambda kv: kv[1]["pnl"], reverse=True):
+                lines.append(f"  {eng}: {s['pnl']:+.2f}$  ({s['n']} trade, WR {s['wr']:.0f}%)")
+    else:
+        lines.append("")
+        lines.append("Nessun trade chiuso oggi.")
+
+    return "\n".join(lines)
+
+
 def compute_stats() -> str:
     """Report testuale completo, pronto per Telegram (HTML)."""
     trades = load_trades()
