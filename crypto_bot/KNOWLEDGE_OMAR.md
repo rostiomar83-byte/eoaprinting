@@ -5,7 +5,7 @@
 > di agire**. La verità è una sola: il repo GitHub `claude/crypto-bot-progress-jxxhty`
 > + il VM che gira da quel repo.
 
-Ultimo aggiornamento: **v4.7** — 2026-07-02
+Ultimo aggiornamento: **v4.8** — 2026-07-03
 
 ---
 
@@ -30,6 +30,13 @@ Filosofia: **quando perdo, perdo poco; quando vinco, lascio correre.**
 | Repo GitHub | `rostiomar83-byte/eoaprinting` |
 | Branch | `claude/crypto-bot-progress-jxxhty` |
 
+**3 bot sul VM (non toccare gli altri due!):**
+| Bot | Cartella | Stato |
+|-----|----------|-------|
+| **CryptoBot Omar** (questo) | `~/crypto_bot/` | Attivo, v4.8 |
+| massabot | `/home/Utente/massabot` | Lasciare invariato |
+| ortobot | `/home/Utente/ortobot` | Lasciare invariato |
+
 **File di stato (NON versionati, protetti da .gitignore):**
 - `positions.json` — posizioni MultiTF/TRIX aperte
 - `mr_positions.json` — posizioni Mean Reversion aperte
@@ -48,23 +55,25 @@ Trend following su 5m e 15m + filtro 4H EMA50. **Opera SOLO in TRENDING_UP** (da
 TRIX + ADX + 4H EMA + volume 1.2×. **Opera SOLO in TRENDING_UP** (da v4.5).
 
 ### 3. Mean Reversion — il motore vincente
-RSI + tocco banda Bollinger inferiore + Fast RSI(7). **Opera SOLO in RANGING** (da v4.7).
+RSI + tocco banda Bollinger inferiore + Fast RSI(7) + candela di recupero. **Opera SOLO in RANGING** (da v4.7).
 **Bloccato anche se BTC è TRENDING_DOWN** (blocco globale aggiunto in v4.7).
 Da v4.4 piazza **ordini reali** (prima era virtuale/paper).
 Le uscite SELL_MR su posizioni già aperte funzionano in qualsiasi regime.
+**Filtro candle recovery (v4.8):** non si compra in caduta libera — la candela corrente
+deve chiudere verde e sopra la chiusura precedente (prima reazione confermata).
 
 ---
 
 ## 📐 Parametri chiave (config.py)
 
 ```
-SYMBOLS = BTC, ETH, SOL, XRP, LINK   # 5 top-liquidity (AVAX/DOGE/ADA rimossi)
-TRADE_AMOUNT_TRENDING_UP = 40        # sizing aggressivo in trend
-TRADE_AMOUNT_RANGING     = 25        # sizing conservativo in laterale
+SYMBOLS = BTC, ETH, SOL, LINK        # v4.8: XRP rimosso (storico negativo)
+TRADE_AMOUNT_TRENDING_UP = 20        # v4.8: ridotto da 40 (breakout non ancora provato)
+TRADE_AMOUNT_RANGING     = 15        # v4.8: ridotto da 25
 MAX_OPEN_POSITIONS = 2               # max posizioni MultiTF/TRIX simultanee
-MAX_EXPOSURE_PCT   = 0.70            # max 70% equity esposto
-MAX_DAILY_LOSS_USDT  = 30
-MAX_WEEKLY_LOSS_USDT = 60
+MAX_EXPOSURE_PCT   = 0.45            # v4.8: ridotto da 70% — protezione capitale prima
+MAX_DAILY_LOSS_USDT  = 5             # v4.8: ridotto da 30 (su $210 era troppo permissivo)
+MAX_WEEKLY_LOSS_USDT = 12            # v4.8: ridotto da 60
 ATR_SL_MULT = 1.5                    # stop loss = 1.5×ATR(1h)
 ATR_TP_MULT = 5.0                    # take profit = 5×ATR → R:R 1:3.3
 PARTIAL_TP_ATR_MULT = 2.0            # vendi 50% a 2×ATR, SL→breakeven
@@ -75,6 +84,7 @@ MIN_TP1_NET_PCT = 0.0025             # il TP1 deve lasciare ≥0.25% netto dopo 
 TRADE_HOUR_START = 7 / END = 23      # no nuovi ingressi 23:00-07:00 UTC
 VOL_SPIKE_MULT = 1.8                 # volatilità >1.8× la media → blocco ingressi
 BREAKOUT_ONLY_TRENDING_UP = True     # breakout solo in TRENDING_UP (v4.5)
+ADX_THRESHOLD = 25                   # soglia ADX per classificare trend vs ranging
 ```
 
 ---
@@ -107,6 +117,15 @@ entry/exit, qty, PnL netto, regime, RSI. Il comando Telegram `/stats` calcola:
 - Breakdown per **motore**, **simbolo**, **ora del giorno**, **regime**
 
 È lo strumento che ha rivelato la falla del breakout in RANGING → decisione v4.5.
+
+---
+
+## 📡 Report automatici Telegram
+
+- **Heartbeat ore 8 e 14**: balance + daily PnL + posizioni aperte
+- **Report giornaliero ore 20 (v4.8)**: riepilogo completo della giornata
+  (PnL totale, trade chiusi, win rate, breakdown per motore)
+  Funzione: `daily_report()` in `stats.py`
 
 ---
 
@@ -175,6 +194,7 @@ tail -5 ~/crypto_bot/bot.log
 | **v4.5** | **Breakout solo in TRENDING_UP** (decisione data-driven dai /stats: breakout 0% WR in RANGING, MR 83%) |
 | **v4.6** | **Anti posizione/monete fantasma**: BUY registra solo con ID ordine valido; SELL MR chiude lo stato solo se la vendita ha successo (altrimenti riprova) |
 | **v4.7** | **MR gate doppio**: BUY_MR solo in RANGING + BTC TRENDING_DOWN = blocco totale MR. Risolve il WR MR crollato a 42% (SOL 0%, ETH 33%) durante discesa BTC. Eliminato il ramo TRENDING_DOWN nell'entrata MR (era catching falling knives). |
+| **v4.8** | **ADX regime fix** (critico): ADX > soglia tornava RANGING invece di TRENDING → ora se ADX alto, sempre TRENDING (mai RANGING con ADX 33-40). **Candle recovery MR**: non si compra in caduta libera (close>open E close>prev_close). **Limiti rischio conservativi**: daily $30→$5, weekly $60→$12, exposure 70%→45%. **Sizing ridotto**: TRENDING_UP $40→$20, RANGING $25→$15. **XRP rimosso** (storico negativo). **Report giornaliero ore 20** via Telegram (daily_report()). RSI MR più selettivo: MR_RSI_BUY 35→28, RSI_FAST_OVERSOLD 32→28. |
 
 ---
 
@@ -254,8 +274,9 @@ parallela è vendere la competenza di costruire bot su Fiverr/Upwork.
 | ~2026-06-27 | 9 | 55.6% | -$1.74 BUY_5M | Breakout in RANGING → v4.5 gate |
 | 2026-06-30 | 15 | 33.3% | -$2.48 | BTC TRENDING_DOWN, MR catching knives |
 | 2026-07-02 | 16 | 31.2% | -$2.53 | Baseline pre-v4.7 (ultimo prima del fix) |
+| 2026-07-03 | — | — | — | v4.8 deploy: ADX fix + candle recovery + limiti conservativi |
 
-**Baseline v4.7 (da usare come confronto al prossimo /stats):**
+**Baseline v4.8 (da usare come confronto al prossimo /stats):**
 - MR: -$0.78, 13 trade, WR 38%
 - BUY_5M: -$1.74, 3 trade, WR 0% — CONGELATO (nessun nuovo trade da v4.5)
 - SOL: 0% WR (-$1.22), ETH: 33% WR (-$1.07)
@@ -278,19 +299,41 @@ parallela è vendere la competenza di costruire bot su Fiverr/Upwork.
 
 ---
 
+## 📋 Modifiche da fare a breve (backlog prioritizzato)
+
+### Priorità 1 — Donchian Breakout 1H
+Upgrade naturale del MultiTF. Usa i massimi/minimi delle ultime 20 candele 1H come
+livelli di breakout. Meno trade, meno fee drag, stessa architettura ATR per SL/TP.
+Filtra molti falsi segnali del 5m. Da fare DOPO il checkpoint /stats post-v4.8.
+
+### Priorità 2 — VWAP Pullback 15m
+Entra in trend durante i rientri verso il VWAP + RSI 40-50. Complementare a MR
+(MR compra oversold estremi, VWAP Pullback compra dip normalizzati in trend).
+Opera solo in TRENDING_UP, integra bene con l'architettura esistente.
+
+### Priorità 3 — Crypto Rotation settimanale
+Ogni domenica sera: ranking dei 4 asset (BTC/ETH/SOL/LINK) per momentum 7-day.
+Sovrappeso l'asset più forte, sottopeso il più debole. Più complesso (richiede
+cron job settimanale o logica calendario). Da fare dopo 1 e 2.
+
+### Da verificare
+- **Fee Kraken luglio 2026**: possibile cambio fee a taker 0.80% (da 0.26%) in Tier 1.
+  Se confermato → aggiornare `FEE_RATE = 0.0026` in config.py + ricalibrare MIN_TP1_NET_PCT.
+  Verifica il 9 luglio 2026 sul pannello Kraken.
+
+---
+
 ## 🔭 Prossimi passi (da fare coi dati in mano)
 
-1. **Checkpoint /stats a ~20-30 trade post-v4.7**: verificare che il gate doppio
-   (RANGING only + BTC no-down) riporti MR sopra WR 65%+. Se BTC torna laterale
-   il bot riprende a fare BUY_MR normalmente.
-2. **Verificare che v4.5 abbia risanato i breakout**: dopo 10+ trade TRENDING_UP,
+1. **Checkpoint /stats a ~20-30 trade post-v4.8**: verificare che ADX fix + candle
+   recovery portino MR sopra WR 65%+. Se BTC torna laterale il bot riprende BUY_MR.
+2. **Verificare fee Kraken (9 luglio 2026)**: se cambiano le fee taker aggiornare
+   FEE_RATE in config.py.
+3. **Implementare Donchian 1H** (priorità 1 del backlog) dopo il checkpoint /stats.
+4. **Verificare che v4.5 abbia risanato i breakout**: dopo 10+ trade TRENDING_UP,
    controllare se MultiTF/TRIX hanno WR accettabile. Se no → disattivare del tutto.
-3. **Limit order maker per MR**: paghi 0.16% invece di 0.26% (fee -38%). Da fare
-   con cautela (gestione fill/timeout/cancel) DOPO aver misurato col journaling se
-   le fee sono davvero il problema. Lo stats engine misura il problema che i limit
-   order dovrebbero risolvere.
-4. **Se BTC resta TRENDING_DOWN a lungo**: il bot starà fermo su MR. È corretto —
+5. **Se BTC resta TRENDING_DOWN a lungo**: il bot starà fermo su MR. È corretto —
    meglio non tradare che perdere. Riaprirà quando il mercato lo permette.
-5. **Freelance**: 5 proposte Upwork/giorno + Reddit r/forhire ogni giorno. Primo
+6. **Freelance**: 5 proposte Upwork/giorno + Reddit r/forhire ogni giorno. Primo
    cliente anche a prezzo ribassato → recensione → poi alza. Le recensioni
    sbloccano il traffico organico su Fiverr.
