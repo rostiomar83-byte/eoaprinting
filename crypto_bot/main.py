@@ -1,5 +1,5 @@
 """
-CryptoBot Omar v4.8 — Professional Edition
+CryptoBot Omar v4.9 — Professional Edition
 Engines attivi:
   1. MultiTF 5m/15m — trend following + 4H EMA filter (TRENDING_UP)
   2. TRIX+ADX 15m   — trend following + 4H EMA + volume 1.2× (TRENDING_UP/RANGING)
@@ -22,6 +22,8 @@ import os
 import time
 import json
 import logging
+from logging.handlers import RotatingFileHandler
+from threading import Lock
 from datetime import datetime, timedelta
 
 import ccxt
@@ -59,7 +61,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(message)s",
     handlers=[
-        logging.FileHandler(LOG_FILE),
+        RotatingFileHandler(LOG_FILE, maxBytes=500_000, backupCount=3),
         logging.StreamHandler(),
     ],
     datefmt="%Y-%m-%d %H:%M:%S",
@@ -102,6 +104,7 @@ def _save_positions():
         json.dump(positions, f, indent=2)
 
 positions: dict = _load_positions()   # symbol → {entry_price, sl, tp, qty, engine, atr, ...}
+position_lock = Lock()               # protegge positions da accessi cross-thread (main ↔ telegram)
 mr_manager = MeanRevManager()
 risk_manager = RiskManager()
 
@@ -159,8 +162,9 @@ def _edge_ok(atr: float, price: float) -> bool:
 
 def _open_value() -> float:
     """Valore reale delle posizioni aperte (multi + MR), a prezzi d'ingresso."""
-    multi = sum(p["qty"] * p["entry_price"] for p in positions.values())
-    mr = sum(p["qty"] * p["entry_price"] for p in mr_manager.positions.values())
+    with position_lock:
+        multi = sum(p["qty"] * p["entry_price"] for p in positions.values())
+        mr = sum(p["qty"] * p["entry_price"] for p in mr_manager.positions.values())
     return multi + mr
 
 
@@ -211,27 +215,28 @@ def place_buy(symbol: str, amount_usd: float, price: float, sl: float, tp: float
             log(f"[BUY ABORT {symbol}] Ordine senza ID — nessuna posizione registrata")
             tg.send_message(f"⚠️ BUY {symbol}: ordine senza conferma, posizione NON aperta")
             return
-        positions[symbol] = {
-            "entry_price": price,
-            "sl": sl,
-            "tp": tp,
-            "tp1": tp1,
-            "qty": qty,
-            "engine": engine,
-            "entry_time": datetime.now().isoformat(),
-            "trailing_sl": sl,
-            "trailing_mult": trail_mult,
-            "atr": atr,
-            "half_sold": False,
-            "regime": regime,
-        }
+        with position_lock:
+            positions[symbol] = {
+                "entry_price": price,
+                "sl": sl,
+                "tp": tp,
+                "tp1": tp1,
+                "qty": qty,
+                "engine": engine,
+                "entry_time": datetime.now().isoformat(),
+                "trailing_sl": sl,
+                "trailing_mult": trail_mult,
+                "atr": atr,
+                "half_sold": False,
+                "regime": regime,
+            }
+            _save_positions()
         msg = (f"✅ BUY {engine} {symbol}\n"
                f"  Prezzo: {price:.4f}\n"
                f"  SL: {sl:.4f}  TP1: {tp1:.4f}  TP: {tp:.4f}\n"
                f"  Qty: {qty:.4f}  ~{amount_usd:.0f}$  trail×{trail_mult}")
         log(msg)
         tg.send_message(msg)
-        _save_positions()
     except Exception as e:
         log(f"[BUY ERR {symbol}] {e}")
         tg.send_message(f"❌ BUY error {symbol}: {e}")
@@ -263,8 +268,9 @@ def place_sell(symbol: str, reason: str):
                f"  PnL: {pnl:+.3f}$")
         log(msg)
         tg.send_message(msg)
-        positions.pop(symbol, None)
-        _save_positions()
+        with position_lock:
+            positions.pop(symbol, None)
+            _save_positions()
     except Exception as e:
         log(f"[SELL ERR {symbol}] {e}")
         tg.send_message(f"❌ SELL error {symbol}: {e}")
@@ -282,14 +288,17 @@ def _cmd_balance():
 
 
 def _cmd_positions():
-    if not positions and not mr_manager.positions:
+    with position_lock:
+        multi_snap = list(positions.items())
+        mr_snap = list(mr_manager.positions.items())
+    if not multi_snap and not mr_snap:
         tg.send_message("Nessuna posizione aperta.")
         return
     lines = []
-    for sym, p in list(positions.items()):
+    for sym, p in multi_snap:
         half = " [50% venduto]" if p.get("half_sold") else ""
         lines.append(f"  [{p['engine']}] {sym} @ {p['entry_price']:.4f}{half}")
-    for sym, p in list(mr_manager.positions.items()):
+    for sym, p in mr_snap:
         lines.append(f"  [MR] {sym} @ {p['entry_price']:.4f}")
     tg.send_message("📊 Posizioni aperte:\n" + "\n".join(lines))
 
@@ -304,9 +313,11 @@ def _cmd_status():
     cds = [s for s, t in multitf_cooldown.items() if datetime.now() < t]
     guard = "🛡️ RISK-OFF" if _last_risk_off else "🟢 normale"
     stato = "⏸ IN PAUSA" if _paused else "▶️ attivo"
-    tg.send_message(f"🤖 CryptoBot Omar v4.8 — {stato}\n"
+    with position_lock:
+        n_pos = len(positions) + len(mr_manager.positions)
+    tg.send_message(f"🤖 CryptoBot Omar v4.9 — {stato}\n"
                     f"  Simboli: {len(SYMBOLS)}\n"
-                    f"  Pos aperte: {len(positions) + len(mr_manager.positions)}\n"
+                    f"  Pos aperte: {n_pos}\n"
                     f"  Daily PnL: {risk_manager.daily_pnl:+.2f}$\n"
                     f"  Volatility Guard: {guard}\n"
                     f"  Cooldown: {cds if cds else 'nessuno'}")
@@ -349,7 +360,7 @@ def _cmd_risk():
     exp_pct = (open_val / equity * 100) if equity > 0 else 0
     from config import MAX_DAILY_LOSS_USDT, MAX_WEEKLY_LOSS_USDT, MAX_EXPOSURE_PCT
     tg.send_message(
-        f"📊 <b>Risk Manager</b>\n\n"
+        f"📊 <b>Risk Manager v4.9</b>\n\n"
         f"Equity totale: {equity:.2f}$\n"
         f"Saldo libero: {bal:.2f}$\n"
         f"Esposto: {open_val:.2f}$ ({exp_pct:.1f}% / max {MAX_EXPOSURE_PCT*100:.0f}%)\n\n"
@@ -369,7 +380,7 @@ def _cmd_stats():
 def _cmd_help():
     paused = "⏸ IN PAUSA" if _paused else "▶️ attivo"
     tg.send_message(
-        f"🤖 <b>CryptoBot Omar v4.8</b> [{paused}]\n\n"
+        f"🤖 <b>CryptoBot Omar v4.9</b> [{paused}]\n\n"
         "/balance — Saldo USDT + PnL giornaliero/settimanale\n"
         "/positions — Posizioni aperte\n"
         "/pnl — PnL dettagliato\n"
@@ -408,7 +419,7 @@ _last_heartbeat_hour = -1
 _last_risk_off = False   # stato precedente del Volatility Guard (per alert una-tantum)
 
 log("=" * 60)
-log(f"CryptoBot Omar v4.8 AVVIATO — {len(SYMBOLS)} simboli")
+log(f"CryptoBot Omar v4.9 AVVIATO — {len(SYMBOLS)} simboli")
 log(f"Engines: MultiTF+4H | TRIX+ADX+4H | MeanRev+BB+FastRSI")
 log(f"Sizing su ATR 1h | R:R 1:3.3 | PartialTP+fee gate | "
     f"TimeFilter {TRADE_HOUR_START}-{TRADE_HOUR_END}UTC | PnL netto fee | "
@@ -416,8 +427,9 @@ log(f"Sizing su ATR 1h | R:R 1:3.3 | PartialTP+fee gate | "
 gate_txt = "Breakout SOLO in TRENDING_UP (RANGING=solo MeanRev)" if BREAKOUT_ONLY_TRENDING_UP else "Breakout in tutti i regimi"
 log(f"Regime gate: {gate_txt}")
 log(f"MR gate v4.8: BUY solo in RANGING + BTC TRENDING_DOWN = blocco totale MR")
+log(f"v4.9: RotatingFileHandler (500KB×3) + threading.Lock su positions")
 log("=" * 60)
-tg.send_message(f"🚀 <b>CryptoBot Omar v4.8 AVVIATO</b>\n"
+tg.send_message(f"🚀 <b>CryptoBot Omar v4.9 AVVIATO</b>\n"
                 f"Simboli: {', '.join(SYMBOLS)}\n"
                 f"MR: RANGING only | BTC down = stop MR\n"
                 f"Sizing ATR 1h | R:R 1:3.3 | PnL netto fee | 🛡️ Volatility Guard")
@@ -777,4 +789,4 @@ while _running:
     time.sleep(LOOP_SLEEP_SECONDS)
 
 log("Bot fermato.")
-tg.send_message("⛔ CryptoBot Omar v4.8 fermato.")
+tg.send_message("⛔ CryptoBot Omar v4.9 fermato.")
