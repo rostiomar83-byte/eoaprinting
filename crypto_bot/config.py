@@ -55,6 +55,8 @@ VOL_BASELINE_PERIODS = 50      # finestra (candele 1h) per la media ATR%
 # In RANGING lavora solo il Mean Reversion. Reversibile: metti False per tornare indietro.
 BREAKOUT_ONLY_TRENDING_UP = True
 
+MIN_CAPITAL_USD = 160            # hard stop: sotto questa equity il bot si mette in pausa automatica
+
 LOOP_SLEEP_SECONDS = 60
 
 LOG_FILE = os.path.expanduser("~/crypto_bot/bot.log")

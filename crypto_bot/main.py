@@ -1,5 +1,5 @@
 """
-CryptoBot Omar v4.9 — Professional Edition
+CryptoBot Omar v4.10 — Professional Edition
 Engines attivi:
   1. MultiTF 5m/15m — trend following + 4H EMA filter (TRENDING_UP)
   2. TRIX+ADX 15m   — trend following + 4H EMA + volume 1.2× (TRENDING_UP/RANGING)
@@ -41,7 +41,7 @@ from config import (
     TRADE_HOUR_START, TRADE_HOUR_END,
     FEE_RATE, MIN_TP1_NET_PCT, MAX_OPEN_POSITIONS,
     VOL_GUARD_ENABLED, VOL_SPIKE_MULT, VOL_BASELINE_PERIODS,
-    BREAKOUT_ONLY_TRENDING_UP,
+    BREAKOUT_ONLY_TRENDING_UP, MIN_CAPITAL_USD,
 )
 from market_regime import get_regime
 from strategy_multiTF import get_signal_multitf
@@ -315,7 +315,7 @@ def _cmd_status():
     stato = "⏸ IN PAUSA" if _paused else "▶️ attivo"
     with position_lock:
         n_pos = len(positions) + len(mr_manager.positions)
-    tg.send_message(f"🤖 CryptoBot Omar v4.9 — {stato}\n"
+    tg.send_message(f"🤖 CryptoBot Omar v4.10 — {stato}\n"
                     f"  Simboli: {len(SYMBOLS)}\n"
                     f"  Pos aperte: {n_pos}\n"
                     f"  Daily PnL: {risk_manager.daily_pnl:+.2f}$\n"
@@ -360,7 +360,7 @@ def _cmd_risk():
     exp_pct = (open_val / equity * 100) if equity > 0 else 0
     from config import MAX_DAILY_LOSS_USDT, MAX_WEEKLY_LOSS_USDT, MAX_EXPOSURE_PCT
     tg.send_message(
-        f"📊 <b>Risk Manager v4.9</b>\n\n"
+        f"📊 <b>Risk Manager v4.10</b>\n\n"
         f"Equity totale: {equity:.2f}$\n"
         f"Saldo libero: {bal:.2f}$\n"
         f"Esposto: {open_val:.2f}$ ({exp_pct:.1f}% / max {MAX_EXPOSURE_PCT*100:.0f}%)\n\n"
@@ -380,7 +380,7 @@ def _cmd_stats():
 def _cmd_help():
     paused = "⏸ IN PAUSA" if _paused else "▶️ attivo"
     tg.send_message(
-        f"🤖 <b>CryptoBot Omar v4.9</b> [{paused}]\n\n"
+        f"🤖 <b>CryptoBot Omar v4.10</b> [{paused}]\n\n"
         "/balance — Saldo USDT + PnL giornaliero/settimanale\n"
         "/positions — Posizioni aperte\n"
         "/pnl — PnL dettagliato\n"
@@ -419,7 +419,7 @@ _last_heartbeat_hour = -1
 _last_risk_off = False   # stato precedente del Volatility Guard (per alert una-tantum)
 
 log("=" * 60)
-log(f"CryptoBot Omar v4.9 AVVIATO — {len(SYMBOLS)} simboli")
+log(f"CryptoBot Omar v4.10 AVVIATO — {len(SYMBOLS)} simboli")
 log(f"Engines: MultiTF+4H | TRIX+ADX+4H | MeanRev+BB+FastRSI")
 log(f"Sizing su ATR 1h | R:R 1:3.3 | PartialTP+fee gate | "
     f"TimeFilter {TRADE_HOUR_START}-{TRADE_HOUR_END}UTC | PnL netto fee | "
@@ -428,8 +428,9 @@ gate_txt = "Breakout SOLO in TRENDING_UP (RANGING=solo MeanRev)" if BREAKOUT_ONL
 log(f"Regime gate: {gate_txt}")
 log(f"MR gate v4.8: BUY solo in RANGING + BTC TRENDING_DOWN = blocco totale MR")
 log(f"v4.9: RotatingFileHandler (500KB×3) + threading.Lock su positions")
+log(f"v4.10: Capital Guard attivo — pausa automatica sotto {MIN_CAPITAL_USD}$")
 log("=" * 60)
-tg.send_message(f"🚀 <b>CryptoBot Omar v4.9 AVVIATO</b>\n"
+tg.send_message(f"🚀 <b>CryptoBot Omar v4.10 AVVIATO</b>\n"
                 f"Simboli: {', '.join(SYMBOLS)}\n"
                 f"MR: RANGING only | BTC down = stop MR\n"
                 f"Sizing ATR 1h | R:R 1:3.3 | PnL netto fee | 🛡️ Volatility Guard")
@@ -510,6 +511,18 @@ while _running:
         bal = get_balance()
         open_value = _open_value()
         equity = bal + open_value   # esposizione misurata su equity totale, non solo free
+
+        # Capital Guard: se l'equity scende sotto la soglia minima, pausa automatica.
+        # Le posizioni aperte continuano ad essere gestite (SL/TP attivi).
+        if equity < MIN_CAPITAL_USD and not _paused:
+            _paused = True
+            log(f"[CAPITAL GUARD] 🛑 Equity {equity:.2f}$ < {MIN_CAPITAL_USD}$ — pausa automatica")
+            tg.send_message(
+                f"🛑 <b>CAPITAL GUARD ATTIVATO</b>\n"
+                f"Equity: {equity:.2f}$  |  Soglia: {MIN_CAPITAL_USD}$\n\n"
+                f"Nessun nuovo ingresso. Le posizioni aperte restano gestite.\n"
+                f"Usa /stop per fermare il bot completamente."
+            )
 
         # Filtro orario: no nuovi ingressi 23:00-07:00 UTC
         in_trading_hours = TRADE_HOUR_START <= now_utc.hour < TRADE_HOUR_END and not _paused
@@ -789,4 +802,4 @@ while _running:
     time.sleep(LOOP_SLEEP_SECONDS)
 
 log("Bot fermato.")
-tg.send_message("⛔ CryptoBot Omar v4.9 fermato.")
+tg.send_message("⛔ CryptoBot Omar v4.10 fermato.")
