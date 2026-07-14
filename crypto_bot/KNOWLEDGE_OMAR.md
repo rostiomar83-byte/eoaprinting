@@ -5,7 +5,7 @@
 > di agire**. La verità è una sola: il repo GitHub `claude/crypto-bot-progress-jxxhty`
 > + il VM che gira da quel repo.
 
-Ultimo aggiornamento: **v4.9** — 2026-07-08
+Ultimo aggiornamento: **v4.10** — 2026-07-14
 
 ---
 
@@ -33,7 +33,7 @@ Filosofia: **quando perdo, perdo poco; quando vinco, lascio correre.**
 **3 bot sul VM (non toccare gli altri due!):**
 | Bot | Cartella | Stato |
 |-----|----------|-------|
-| **CryptoBot Omar** (questo) | `~/crypto_bot/` | Attivo, v4.8 |
+| **CryptoBot Omar** (questo) | `~/crypto_bot/` | Attivo, v4.10 |
 | massabot | `/home/Utente/massabot` | Lasciare invariato |
 | ortobot | `/home/Utente/ortobot` | Lasciare invariato |
 
@@ -85,6 +85,7 @@ TRADE_HOUR_START = 7 / END = 23      # no nuovi ingressi 23:00-07:00 UTC
 VOL_SPIKE_MULT = 1.8                 # volatilità >1.8× la media → blocco ingressi
 BREAKOUT_ONLY_TRENDING_UP = True     # breakout solo in TRENDING_UP (v4.5)
 ADX_THRESHOLD = 25                   # soglia ADX per classificare trend vs ranging
+MIN_CAPITAL_USD = 160                # v4.10: hard stop — sotto questa equity il bot si mette in pausa
 ```
 
 ---
@@ -108,6 +109,7 @@ ADX_THRESHOLD = 25                   # soglia ADX per classificare trend vs rang
 11. **Anti-fantasma** (v4.6): stato locale sincronizzato col conto Kraken reale. BUY registra SOLO se `order.get("id")` esiste. SELL aggiorna stato SOLO se la vendita è confermata, altrimenti riprova.
 12. **Thread safety** (v4.9): `threading.Lock` su `positions` — il thread Telegram e il main loop non corrono in race condition su letture/scritture del dict posizioni.
 13. **Log rotation** (v4.9): `RotatingFileHandler` 500KB × 3 file — il log non cresce a dismisura sui riavvii lunghi.
+14. **Capital Guard** (v4.10): se equity < $160, il bot si mette in pausa automatica con alert Telegram. Le posizioni aperte restano gestite dai loro stop. Nessun nuovo ingresso finché non si riprende manualmente con `/resume` o si aggiunge capitale.
 
 ---
 
@@ -198,6 +200,7 @@ tail -5 ~/crypto_bot/bot.log
 | **v4.7** | **MR gate doppio**: BUY_MR solo in RANGING + BTC TRENDING_DOWN = blocco totale MR. Risolve il WR MR crollato a 42% (SOL 0%, ETH 33%) durante discesa BTC. Eliminato il ramo TRENDING_DOWN nell'entrata MR (era catching falling knives). |
 | **v4.8** | **ADX regime fix** (critico): ADX > soglia tornava RANGING invece di TRENDING → ora se ADX alto, sempre TRENDING (mai RANGING con ADX 33-40). **Candle recovery MR**: non si compra in caduta libera (close>open E close>prev_close). **Limiti rischio conservativi**: daily $30→$5, weekly $60→$12, exposure 70%→45%. **Sizing ridotto**: TRENDING_UP $40→$20, RANGING $25→$15. **XRP rimosso** (storico negativo). **Report giornaliero ore 20** via Telegram (daily_report()). RSI MR più selettivo: MR_RSI_BUY 35→28, RSI_FAST_OVERSOLD 32→28. |
 | **v4.9** | **Robustezza**: `RotatingFileHandler` (500KB×3 file — il log non cresce più per sempre). `threading.Lock` su `positions` (protegge accessi cross-thread tra main loop e Telegram handlers). Nessun impatto funzionale — solo hardening. |
+| **v4.10** | **Capital Guard**: hard stop automatico a $160 di equity. Se il saldo scende sotto la soglia: bot in pausa automatica + alert Telegram con istruzioni. Le posizioni aperte restano gestite dai loro SL/TP. Riprende con `/resume` o aggiunta di capitale. Aggiunto `MIN_CAPITAL_USD = 160` in `config.py`. |
 
 ---
 
@@ -346,14 +349,14 @@ cron job settimanale o logica calendario). Da fare dopo 1 e 2.
 
 ## 🔭 Prossimi passi (da fare coi dati in mano)
 
-1. **Checkpoint /stats a ~20-30 trade post-v4.8**: verificare che ADX fix + candle
-   recovery portino MR sopra WR 65%+. Siamo a 10 trade post-v4.8 (al 2026-07-08).
-2. **Verificare fee Kraken (9 luglio 2026)**: possibile cambio taker 0.26%→0.80%.
+1. **Checkpoint /stats a ~20-30 trade post-v4.9**: verificare che ADX fix + candle
+   recovery portino MR sopra WR 55%+. v4.9/v4.10 in produzione dal 2026-07-13 — zero
+   trade registrati con ADX corretto ancora. I 46 trade precedenti erano tutti con ADX rotto.
+2. **Verificare fee Kraken**: possibile cambio taker 0.26%→0.80% in Tier 1.
    Se confermato: aggiornare `FEE_RATE` in config.py + ricalibrare `MIN_TP1_NET_PCT`.
-3. **Deploy v4.9 su VM** (RotatingFileHandler + Lock): usare il blocco wget standard.
-4. **Implementare Donchian 1H** (priorità 1 del backlog) dopo il checkpoint /stats.
-5. **Verificare che v4.5 abbia risanato i breakout**: dopo 10+ trade TRENDING_UP,
-   controllare se MultiTF/TRIX hanno WR accettabile. Se no → disattivare del tutto.
+3. **Implementare Donchian 1H** (priorità 1 del backlog) dopo il checkpoint /stats.
+4. **Verificare che TRENDING_UP engines abbiano WR accettabile**: dopo 10+ trade,
+   controllare MultiTF/TRIX (attualmente TRIX 100% WR 2 trade, BUY_5M 71% 7 trade).
 5. **Se BTC resta TRENDING_DOWN a lungo**: il bot starà fermo su MR. È corretto —
    meglio non tradare che perdere. Riaprirà quando il mercato lo permette.
 6. **Freelance**: 5 proposte Upwork/giorno + Reddit r/forhire ogni giorno. Primo
