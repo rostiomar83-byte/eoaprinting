@@ -1,5 +1,5 @@
 """
-CryptoBot Omar v4.10 — Professional Edition
+CryptoBot Omar v4.11 — Professional Edition
 Engines attivi:
   1. MultiTF 5m/15m — trend following + 4H EMA filter (TRENDING_UP)
   2. TRIX+ADX 15m   — trend following + 4H EMA + volume 1.2× (TRENDING_UP/RANGING)
@@ -243,7 +243,10 @@ def place_buy(symbol: str, amount_usd: float, price: float, sl: float, tp: float
 
 
 def place_sell(symbol: str, reason: str):
-    pos = positions.get(symbol)
+    with position_lock:
+        pos = positions.get(symbol)
+        if pos:
+            pos = dict(pos)  # copia per non tenere il lock durante le chiamate API
     if not pos:
         return
     try:
@@ -315,7 +318,7 @@ def _cmd_status():
     stato = "⏸ IN PAUSA" if _paused else "▶️ attivo"
     with position_lock:
         n_pos = len(positions) + len(mr_manager.positions)
-    tg.send_message(f"🤖 CryptoBot Omar v4.10 — {stato}\n"
+    tg.send_message(f"🤖 CryptoBot Omar v4.11 — {stato}\n"
                     f"  Simboli: {len(SYMBOLS)}\n"
                     f"  Pos aperte: {n_pos}\n"
                     f"  Daily PnL: {risk_manager.daily_pnl:+.2f}$\n"
@@ -380,7 +383,7 @@ def _cmd_stats():
 def _cmd_help():
     paused = "⏸ IN PAUSA" if _paused else "▶️ attivo"
     tg.send_message(
-        f"🤖 <b>CryptoBot Omar v4.10</b> [{paused}]\n\n"
+        f"🤖 <b>CryptoBot Omar v4.11</b> [{paused}]\n\n"
         "/balance — Saldo USDT + PnL giornaliero/settimanale\n"
         "/positions — Posizioni aperte\n"
         "/pnl — PnL dettagliato\n"
@@ -415,11 +418,12 @@ tg.start_polling({
 
 _running = True
 _paused = False
+_capital_guard_active = False  # True solo quando la pausa è stata attivata dal Capital Guard
 _last_heartbeat_hour = -1
 _last_risk_off = False   # stato precedente del Volatility Guard (per alert una-tantum)
 
 log("=" * 60)
-log(f"CryptoBot Omar v4.10 AVVIATO — {len(SYMBOLS)} simboli")
+log(f"CryptoBot Omar v4.11 AVVIATO — {len(SYMBOLS)} simboli")
 log(f"Engines: MultiTF+4H | TRIX+ADX+4H | MeanRev+BB+FastRSI")
 log(f"Sizing su ATR 1h | R:R 1:3.3 | PartialTP+fee gate | "
     f"TimeFilter {TRADE_HOUR_START}-{TRADE_HOUR_END}UTC | PnL netto fee | "
@@ -429,8 +433,9 @@ log(f"Regime gate: {gate_txt}")
 log(f"MR gate v4.8: BUY solo in RANGING + BTC TRENDING_DOWN = blocco totale MR")
 log(f"v4.9: RotatingFileHandler (500KB×3) + threading.Lock su positions")
 log(f"v4.10: Capital Guard attivo — pausa automatica sotto {MIN_CAPITAL_USD}$")
+log(f"v4.11: Telegram chunking 4000chr | Capital Guard auto-resume | place_sell lock")
 log("=" * 60)
-tg.send_message(f"🚀 <b>CryptoBot Omar v4.10 AVVIATO</b>\n"
+tg.send_message(f"🚀 <b>CryptoBot Omar v4.11 AVVIATO</b>\n"
                 f"Simboli: {', '.join(SYMBOLS)}\n"
                 f"MR: RANGING only | BTC down = stop MR\n"
                 f"Sizing ATR 1h | R:R 1:3.3 | PnL netto fee | 🛡️ Volatility Guard")
@@ -514,14 +519,25 @@ while _running:
 
         # Capital Guard: se l'equity scende sotto la soglia minima, pausa automatica.
         # Le posizioni aperte continuano ad essere gestite (SL/TP attivi).
+        # Auto-resume solo se era il Capital Guard ad aver messo in pausa (non /pause manuale).
         if equity < MIN_CAPITAL_USD and not _paused:
             _paused = True
+            _capital_guard_active = True
             log(f"[CAPITAL GUARD] 🛑 Equity {equity:.2f}$ < {MIN_CAPITAL_USD}$ — pausa automatica")
             tg.send_message(
                 f"🛑 <b>CAPITAL GUARD ATTIVATO</b>\n"
                 f"Equity: {equity:.2f}$  |  Soglia: {MIN_CAPITAL_USD}$\n\n"
                 f"Nessun nuovo ingresso. Le posizioni aperte restano gestite.\n"
                 f"Usa /stop per fermare il bot completamente."
+            )
+        elif equity >= MIN_CAPITAL_USD and _paused and _capital_guard_active:
+            _paused = False
+            _capital_guard_active = False
+            log(f"[CAPITAL GUARD] ✅ Equity {equity:.2f}$ ≥ {MIN_CAPITAL_USD}$ — ripresa automatica")
+            tg.send_message(
+                f"✅ <b>CAPITAL GUARD disattivato</b>\n"
+                f"Equity: {equity:.2f}$  |  Soglia: {MIN_CAPITAL_USD}$\n"
+                f"Nuovi ingressi riabilitati automaticamente."
             )
 
         # Filtro orario: no nuovi ingressi 23:00-07:00 UTC
@@ -802,4 +818,4 @@ while _running:
     time.sleep(LOOP_SLEEP_SECONDS)
 
 log("Bot fermato.")
-tg.send_message("⛔ CryptoBot Omar v4.10 fermato.")
+tg.send_message("⛔ CryptoBot Omar v4.11 fermato.")

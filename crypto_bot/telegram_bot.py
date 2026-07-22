@@ -18,13 +18,17 @@ _last_update_id = 0
 def send_message(text: str):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         return
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    # Telegram cap: 4096 chars. Splitting avoids silent truncation on /stats, /log, daily report.
+    chunk_size = 4000
+    chunks = [text[i:i + chunk_size] for i in range(0, max(1, len(text)), chunk_size)]
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, json={
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": text,
-            "parse_mode": "HTML",
-        }, timeout=10)
+        for chunk in chunks:
+            requests.post(url, json={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": chunk,
+                "parse_mode": "HTML",
+            }, timeout=10)
     except Exception:
         pass
 
