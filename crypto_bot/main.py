@@ -1,5 +1,5 @@
 """
-CryptoBot Omar v4.11 — Professional Edition
+CryptoBot Omar v4.12 — Professional Edition
 Engines attivi:
   1. MultiTF 5m/15m — trend following + 4H EMA filter (TRENDING_UP)
   2. TRIX+ADX 15m   — trend following + 4H EMA + volume 1.2× (TRENDING_UP/RANGING)
@@ -41,7 +41,7 @@ from config import (
     TRADE_HOUR_START, TRADE_HOUR_END,
     FEE_RATE, MIN_TP1_NET_PCT, MAX_OPEN_POSITIONS,
     VOL_GUARD_ENABLED, VOL_SPIKE_MULT, VOL_BASELINE_PERIODS,
-    BREAKOUT_ONLY_TRENDING_UP, MIN_CAPITAL_USD,
+    BREAKOUT_ONLY_TRENDING_UP, MIN_CAPITAL_USD, MR_ENABLED,
 )
 from market_regime import get_regime
 from strategy_multiTF import get_signal_multitf
@@ -318,7 +318,7 @@ def _cmd_status():
     stato = "⏸ IN PAUSA" if _paused else "▶️ attivo"
     with position_lock:
         n_pos = len(positions) + len(mr_manager.positions)
-    tg.send_message(f"🤖 CryptoBot Omar v4.11 — {stato}\n"
+    tg.send_message(f"🤖 CryptoBot Omar v4.12 — {stato}\n"
                     f"  Simboli: {len(SYMBOLS)}\n"
                     f"  Pos aperte: {n_pos}\n"
                     f"  Daily PnL: {risk_manager.daily_pnl:+.2f}$\n"
@@ -383,7 +383,7 @@ def _cmd_stats():
 def _cmd_help():
     paused = "⏸ IN PAUSA" if _paused else "▶️ attivo"
     tg.send_message(
-        f"🤖 <b>CryptoBot Omar v4.11</b> [{paused}]\n\n"
+        f"🤖 <b>CryptoBot Omar v4.12</b> [{paused}]\n\n"
         "/balance — Saldo USDT + PnL giornaliero/settimanale\n"
         "/positions — Posizioni aperte\n"
         "/pnl — PnL dettagliato\n"
@@ -423,7 +423,7 @@ _last_heartbeat_hour = -1
 _last_risk_off = False   # stato precedente del Volatility Guard (per alert una-tantum)
 
 log("=" * 60)
-log(f"CryptoBot Omar v4.11 AVVIATO — {len(SYMBOLS)} simboli")
+log(f"CryptoBot Omar v4.12 AVVIATO — {len(SYMBOLS)} simboli")
 log(f"Engines: MultiTF+4H | TRIX+ADX+4H | MeanRev+BB+FastRSI")
 log(f"Sizing su ATR 1h | R:R 1:3.3 | PartialTP+fee gate | "
     f"TimeFilter {TRADE_HOUR_START}-{TRADE_HOUR_END}UTC | PnL netto fee | "
@@ -434,10 +434,13 @@ log(f"MR gate v4.8: BUY solo in RANGING + BTC TRENDING_DOWN = blocco totale MR")
 log(f"v4.9: RotatingFileHandler (500KB×3) + threading.Lock su positions")
 log(f"v4.10: Capital Guard attivo — pausa automatica sotto {MIN_CAPITAL_USD}$")
 log(f"v4.11: Telegram chunking 4000chr | Capital Guard auto-resume | place_sell lock")
+mr_status = "ATTIVO" if MR_ENABLED else "DISABILITATO (56 trade: WR 34%, -$1.90)"
+log(f"v4.12: Mean Reversion {mr_status}")
 log("=" * 60)
-tg.send_message(f"🚀 <b>CryptoBot Omar v4.11 AVVIATO</b>\n"
+mr_note = "🔴 MR DISABILITATO (dati: WR 34%)" if not MR_ENABLED else "🟢 MR attivo (RANGING only)"
+tg.send_message(f"🚀 <b>CryptoBot Omar v4.12 AVVIATO</b>\n"
                 f"Simboli: {', '.join(SYMBOLS)}\n"
-                f"MR: RANGING only | BTC down = stop MR\n"
+                f"{mr_note}\n"
                 f"Sizing ATR 1h | R:R 1:3.3 | PnL netto fee | 🛡️ Volatility Guard")
 
 
@@ -730,7 +733,7 @@ while _running:
                                     f"  RSI: {rsi_mr:.1f}  PnL: {pnl:+.3f}$")
                     log(f"[MR SELL] {symbol} RSI={rsi_mr:.1f} PnL={pnl:+.3f}$")
 
-                elif sig_mr == "BUY_MR" and not has_pos_mr and not has_pos_multi:
+                elif MR_ENABLED and sig_mr == "BUY_MR" and not has_pos_mr and not has_pos_multi:
                     if vol_spike:
                         log(f"[MR SKIP {symbol}] Volatility Guard (vol {sym_vol:.1f}×)")
                     elif not _atr_valid(atr_h):
@@ -818,4 +821,4 @@ while _running:
     time.sleep(LOOP_SLEEP_SECONDS)
 
 log("Bot fermato.")
-tg.send_message("⛔ CryptoBot Omar v4.11 fermato.")
+tg.send_message("⛔ CryptoBot Omar v4.12 fermato.")

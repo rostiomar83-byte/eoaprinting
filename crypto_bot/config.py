@@ -55,6 +55,11 @@ VOL_BASELINE_PERIODS = 50      # finestra (candele 1h) per la media ATR%
 # In RANGING lavora solo il Mean Reversion. Reversibile: metti False per tornare indietro.
 BREAKOUT_ONLY_TRENDING_UP = True
 
+# v4.12: MR disabilitato — 56 trade dimostrano RANGING WR 36% / -$2.49
+# Reversibile: metti True per riattivare. Le posizioni MR aperte vengono
+# comunque gestite (SL/TP/TIMEOUT) anche con MR_ENABLED = False.
+MR_ENABLED = False
+
 MIN_CAPITAL_USD = 160            # hard stop: sotto questa equity il bot si mette in pausa automatica
 
 LOOP_SLEEP_SECONDS = 60
