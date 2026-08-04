@@ -15,6 +15,7 @@ RSI_SELL_MIN = 42
 RSI_SELL_MAX = 60
 
 BB_SQUEEZE_MULT = 0.6   # BB bandwidth < 60% della media storica → squeeze
+MIN_ADX_5M = 20         # v4.13: ADX minimo — entra solo in trend con forza reale
 
 
 def _fetch(exchange, symbol: str, timeframe: str, limit: int = 150) -> pd.DataFrame:
@@ -80,10 +81,15 @@ def get_signal_multitf(exchange, symbol: str, has_position: bool,
             if last_candle_bull and vol_ok:
                 return "BUY_5M", rsi_5m, price, atr
 
-    # --- BUY in TRENDING_UP + sopra 4H EMA50 ---
+    # ADX su 5m: filtra i trend deboli — entra solo se il trend ha forza reale.
+    # TRIX ha 100% WR con questo filtro; BUY_5M senza ADX aveva WR 52% (-$2.22).
+    adx_5m = ta.trend.ADXIndicator(df_5m["high"], df_5m["low"], close_5m, window=14).adx().iloc[-1]
+
+    # --- BUY in TRENDING_UP + sopra 4H EMA50 + ADX confermato ---
     if regime == "TRENDING_UP" and not has_position and above_4h_ema:
         rsi_ok = RSI_BUY_MIN <= rsi_5m <= RSI_BUY_MAX
-        if rsi_ok and ema_up and vol_ok:
+        adx_ok = adx_5m >= MIN_ADX_5M
+        if rsi_ok and ema_up and vol_ok and adx_ok:
             # Conferma 15m
             rsi_15m = ta.momentum.RSIIndicator(close_15m, window=14).rsi().iloc[-1]
             ema20_15m = ta.trend.EMAIndicator(close_15m, window=20).ema_indicator().iloc[-1]

@@ -1,5 +1,5 @@
 """
-CryptoBot Omar v4.12 — Professional Edition
+CryptoBot Omar v4.13 — Professional Edition
 Engines attivi:
   1. MultiTF 5m/15m — trend following + 4H EMA filter (TRENDING_UP)
   2. TRIX+ADX 15m   — trend following + 4H EMA + volume 1.2× (TRENDING_UP/RANGING)
@@ -318,7 +318,7 @@ def _cmd_status():
     stato = "⏸ IN PAUSA" if _paused else "▶️ attivo"
     with position_lock:
         n_pos = len(positions) + len(mr_manager.positions)
-    tg.send_message(f"🤖 CryptoBot Omar v4.12 — {stato}\n"
+    tg.send_message(f"🤖 CryptoBot Omar v4.13 — {stato}\n"
                     f"  Simboli: {len(SYMBOLS)}\n"
                     f"  Pos aperte: {n_pos}\n"
                     f"  Daily PnL: {risk_manager.daily_pnl:+.2f}$\n"
@@ -383,7 +383,7 @@ def _cmd_stats():
 def _cmd_help():
     paused = "⏸ IN PAUSA" if _paused else "▶️ attivo"
     tg.send_message(
-        f"🤖 <b>CryptoBot Omar v4.12</b> [{paused}]\n\n"
+        f"🤖 <b>CryptoBot Omar v4.13</b> [{paused}]\n\n"
         "/balance — Saldo USDT + PnL giornaliero/settimanale\n"
         "/positions — Posizioni aperte\n"
         "/pnl — PnL dettagliato\n"
@@ -423,7 +423,7 @@ _last_heartbeat_hour = -1
 _last_risk_off = False   # stato precedente del Volatility Guard (per alert una-tantum)
 
 log("=" * 60)
-log(f"CryptoBot Omar v4.12 AVVIATO — {len(SYMBOLS)} simboli")
+log(f"CryptoBot Omar v4.13 AVVIATO — {len(SYMBOLS)} simboli")
 log(f"Engines: MultiTF+4H | TRIX+ADX+4H | MeanRev+BB+FastRSI")
 log(f"Sizing su ATR 1h | R:R 1:3.3 | PartialTP+fee gate | "
     f"TimeFilter {TRADE_HOUR_START}-{TRADE_HOUR_END}UTC | PnL netto fee | "
@@ -436,12 +436,14 @@ log(f"v4.10: Capital Guard attivo — pausa automatica sotto {MIN_CAPITAL_USD}$"
 log(f"v4.11: Telegram chunking 4000chr | Capital Guard auto-resume | place_sell lock")
 mr_status = "ATTIVO" if MR_ENABLED else "DISABILITATO (56 trade: WR 34%, -$1.90)"
 log(f"v4.12: Mean Reversion {mr_status}")
+log(f"v4.13: ADX filter su BUY_5M (MIN_ADX=20) | Partial TP rimosso (R:R 1:3.3)")
 log("=" * 60)
 mr_note = "🔴 MR DISABILITATO (dati: WR 34%)" if not MR_ENABLED else "🟢 MR attivo (RANGING only)"
-tg.send_message(f"🚀 <b>CryptoBot Omar v4.12 AVVIATO</b>\n"
+tg.send_message(f"🚀 <b>CryptoBot Omar v4.13 AVVIATO</b>\n"
                 f"Simboli: {', '.join(SYMBOLS)}\n"
                 f"{mr_note}\n"
-                f"Sizing ATR 1h | R:R 1:3.3 | PnL netto fee | 🛡️ Volatility Guard")
+                f"BUY_5M: ADX≥20 filter | No Partial TP | R:R 1:3.3 puro\n"
+                f"Trailing {TRAILING_ATR_TRENDING_UP}×ATR | 🛡️ Volatility Guard")
 
 
 def _fetch_regime_df(symbol: str):
@@ -612,32 +614,6 @@ while _running:
 
                     trail_mult = pos.get("trailing_mult", TRAILING_ATR_MULT)
                     atr_val = pos.get("atr", 0)
-
-                    # Partial TP: vendi 50% a TP1, sposta SL a breakeven
-                    if not pos.get("half_sold", False) and _atr_valid(atr_val):
-                        tp1 = pos.get("tp1", float("inf"))
-                        if current_price >= tp1:
-                            half_qty = pos["qty"] / 2
-                            try:
-                                exchange.create_market_sell_order(symbol, _amt(symbol, half_qty))
-                                partial_pnl = _net_pnl(pos["entry_price"], current_price, half_qty)
-                                risk_manager.record_pnl(partial_pnl)
-                                record_trade(symbol, pos["engine"], "PARTIAL_TP",
-                                             pos["entry_price"], current_price, half_qty,
-                                             partial_pnl, pos.get("regime", ""))
-                                pos["qty"] = half_qty
-                                pos["half_sold"] = True
-                                # Breakeven NETTO: copre anche le fee del round-trip
-                                breakeven = pos["entry_price"] * (1 + 2 * FEE_RATE)
-                                pos["trailing_sl"] = breakeven
-                                _save_positions()
-                                msg = (f"⚡ PARTIAL TP {pos['engine']} {symbol}\n"
-                                       f"  50% @ {current_price:.4f}  Parziale: {partial_pnl:+.3f}$\n"
-                                       f"  SL → breakeven netto: {breakeven:.4f}")
-                                log(msg)
-                                tg.send_message(msg)
-                            except Exception as e:
-                                log(f"[PARTIAL TP ERR {symbol}] {e}")
 
                     # Trailing stop con moltiplicatore adattivo per regime
                     new_sl = current_price - trail_mult * atr_val
@@ -821,4 +797,4 @@ while _running:
     time.sleep(LOOP_SLEEP_SECONDS)
 
 log("Bot fermato.")
-tg.send_message("⛔ CryptoBot Omar v4.12 fermato.")
+tg.send_message("⛔ CryptoBot Omar v4.13 fermato.")
