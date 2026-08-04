@@ -5,7 +5,7 @@
 > di agire**. La verità è una sola: il repo GitHub `claude/crypto-bot-progress-jxxhty`
 > + il VM che gira da quel repo.
 
-Ultimo aggiornamento: **v4.11** — 2026-07-22
+Ultimo aggiornamento: **v4.13** — 2026-08-04
 
 ---
 
@@ -33,7 +33,7 @@ Filosofia: **quando perdo, perdo poco; quando vinco, lascio correre.**
 **3 bot sul VM (non toccare gli altri due!):**
 | Bot | Cartella | Stato |
 |-----|----------|-------|
-| **CryptoBot Omar** (questo) | `~/crypto_bot/` | Attivo, v4.11 |
+| **CryptoBot Omar** (questo) | `~/crypto_bot/` | Attivo, v4.13 |
 | massabot | `/home/Utente/massabot` | Lasciare invariato |
 | ortobot | `/home/Utente/ortobot` | Lasciare invariato |
 
@@ -54,13 +54,15 @@ Trend following su 5m e 15m + filtro 4H EMA50. **Opera SOLO in TRENDING_UP** (da
 ### 2. TRIX + ADX (15m) — breakout/trend
 TRIX + ADX + 4H EMA + volume 1.2×. **Opera SOLO in TRENDING_UP** (da v4.5).
 
-### 3. Mean Reversion — il motore vincente
+### 3. Mean Reversion — **DISABILITATO da v4.12**
 RSI + tocco banda Bollinger inferiore + Fast RSI(7) + candela di recupero. **Opera SOLO in RANGING** (da v4.7).
 **Bloccato anche se BTC è TRENDING_DOWN** (blocco globale aggiunto in v4.7).
 Da v4.4 piazza **ordini reali** (prima era virtuale/paper).
 Le uscite SELL_MR su posizioni già aperte funzionano in qualsiasi regime.
 **Filtro candle recovery (v4.8):** non si compra in caduta libera — la candela corrente
 deve chiudere verde e sopra la chiusura precedente (prima reazione confermata).
+**⛔ v4.12: DISABILITATO** — 56 trade confermano RANGING WR 36%, -$2.49 totali.
+Reversibile: `MR_ENABLED = True` in `config.py`.
 
 ---
 
@@ -109,7 +111,7 @@ MIN_CAPITAL_USD = 160                # v4.10: hard stop — sotto questa equity 
 11. **Anti-fantasma** (v4.6): stato locale sincronizzato col conto Kraken reale. BUY registra SOLO se `order.get("id")` esiste. SELL aggiorna stato SOLO se la vendita è confermata, altrimenti riprova.
 12. **Thread safety** (v4.9): `threading.Lock` su `positions` — il thread Telegram e il main loop non corrono in race condition su letture/scritture del dict posizioni.
 13. **Log rotation** (v4.9): `RotatingFileHandler` 500KB × 3 file — il log non cresce a dismisura sui riavvii lunghi.
-14. **Capital Guard** (v4.10): se equity < $160, il bot si mette in pausa automatica con alert Telegram. Le posizioni aperte restano gestite dai loro stop. Nessun nuovo ingresso finché non si riprende manualmente con `/resume` o si aggiunge capitale.
+14. **Capital Guard** (v4.10/v4.11): se equity < $160, il bot si mette in pausa automatica con alert Telegram. Le posizioni aperte restano gestite dai loro stop. **Auto-resume (v4.11)**: il bot riprende automaticamente quando equity risale ≥ $160 (flag `_capital_guard_active` distingue questa pausa da un `/pause` manuale). Riprende manualmente con `/resume` o aggiunta di capitale.
 
 ---
 
@@ -202,6 +204,8 @@ tail -5 ~/crypto_bot/bot.log
 | **v4.9** | **Robustezza**: `RotatingFileHandler` (500KB×3 file — il log non cresce più per sempre). `threading.Lock` su `positions` (protegge accessi cross-thread tra main loop e Telegram handlers). Nessun impatto funzionale — solo hardening. |
 | **v4.10** | **Capital Guard**: hard stop automatico a $160 di equity. Se il saldo scende sotto la soglia: bot in pausa automatica + alert Telegram con istruzioni. Le posizioni aperte restano gestite dai loro SL/TP. Riprende con `/resume` o aggiunta di capitale. Aggiunto `MIN_CAPITAL_USD = 160` in `config.py`. |
 | **v4.11** | **3 bug fix**: (1) `send_message()` chunking automatico a 4000 char (Telegram cap 4096 → /stats /log daily report non vengono più troncati). (2) Capital Guard auto-resume quando equity risale sopra soglia (flag `_capital_guard_active` distingue da `/pause` manuale). (3) `place_sell()` legge `positions` dentro `position_lock` con shallow copy (elimina race condition tra main loop e thread Telegram). |
+| **v4.12** | **MR disabilitato**: 56 trade dimostrano RANGING sistematicamente perdente (WR 36%, -$2.49). Flag `MR_ENABLED = False` in config.py — reversibile. Le posizioni MR già aperte vengono comunque gestite da SL/TP/TIMEOUT. |
+| **v4.13** | **Fix R:R strutturale** (root cause dei -$2.73 totali): (1) ADX ≥ 20 su BUY_5M in `strategy_multiTF.py` — entra solo in trend con forza reale (TRIX aveva 100% WR con ADX, BUY_5M senza ADX aveva WR 52% e perdeva). (2) Partial TP rimosso da `main.py` — le posizioni corrono a TP pieno (5×ATR) o trailing SL. R:R teorico 1:3.3, breakeven WR = 23% (da 59% con partial TP). |
 
 ---
 
@@ -219,12 +223,19 @@ tail -5 ~/crypto_bot/bot.log
   un'illusione — il vero trend è down. I dati (MR WR 83% → 42% in 3 giorni di
   BTC in calo) hanno confermato: il motivo delle perdite non era la strategia MR in
   sé, ma il contesto macro sbagliato in cui veniva usata.
-- **MR disabilitato (v4.12)**: dopo 56 trade, i dati mostrano che RANGING è una
-  trappola sistematica (WR 36%, -$2.49). Il SELL_MR usciva troppo presto (R:R
-  realizzato 1:0.7 vs target 1:2.5), e il WR del 34% non basta per coprire le
-  perdite. TRENDING_UP è l'unico contesto con edge reale (72% WR, +$1.17).
-  Decisione: bot opera solo in TRENDING_UP (TRIX + MultiTF). In RANGING: attesa.
-  Reversibile: `MR_ENABLED = True` in config.py.
+- **MR disabilitato (v4.12)**: dopo 56 trade, RANGING è una trappola sistematica
+  (WR 36%, -$2.49). Bot opera solo in TRENDING_UP. Reversibile: `MR_ENABLED = True`.
+- **ADX come gate universale (v4.13)**: TRIX aveva 100% WR perché richiede ADX > 20.
+  BUY_5M senza ADX entrava in trend deboli → R:R 1:0.7. Con ADX ≥ 20 su tutti i
+  motori, si entra solo quando il trend ha forza reale. Regola: nessun motore breakout
+  senza conferma ADX.
+- **Partial TP rimosso (v4.13)**: il partial TP vendeva 50% a 2×ATR e spostava SL a
+  breakeven. In trend deboli (pre-ADX filter) questo creava R:R 1:0.7. Senza partial TP
+  + con ADX filter: R:R 1:3.3 puro (win = 5×ATR, loss = 1.5×ATR). Breakeven WR scende
+  da 59% a 23% — molto più gestibile con WR atteso 55-65%.
+- **Scalare SOLO dopo strategia positiva**: aumentare gli importi su strategia perdente
+  amplifica le perdite linearmente. Prima conferma dati (15-20 trade post-v4.13),
+  poi scala da $20 a $30-40 per trade.
 - **Decidere coi dati, non con l'intuizione**: niente cambi di strategia su 1 trade;
   agire quando c'è tesi forte + dati coerenti + azione conservativa.
 
@@ -251,9 +262,13 @@ tail -5 ~/crypto_bot/bot.log
    la versione corretta girata.
 7. **SELL_MR uccide il R:R.** Il SELL_MR (uscita RSI-based) chiude le posizioni
    MR prima del TP, catturando +$0.14 di media mentre il SL colpisce per -$0.20.
-   Con WR 34% e R:R 1:0.7 il sistema perde matematicamente. Un'uscita solo via
-   SL/TP/TIMEOUT avrebbe R:R teorico 1:2.5 — ma WR sconosciuto. Dati insufficienti
-   per ottimizzare: disabilitare MR e raccogliere più dati in TRENDING_UP.
+   Con WR 34% e R:R 1:0.7 il sistema perde matematicamente. Soluzione: MR disabilitato.
+8. **ADX è il filtro più importante.** TRIX (ADX > 20) = 100% WR su 4 trade.
+   BUY_5M (no ADX) = 52% WR, -$2.22 su 31 trade. La differenza è tutta nel filtro
+   di forza trend. Senza ADX si entra in "trend" che sono in realtà rimbalzi nel RANGING.
+9. **Non scalare prima che la strategia sia positiva.** Raddoppiare importi su
+   strategia perdente raddoppia le perdite. Sequenza corretta: fix → 15-20 trade →
+   conferma dati → poi scala.
 
 ---
 
@@ -294,6 +309,7 @@ parallela è vendere la competenza di costruire bot su Fiverr/Upwork.
 | 2026-07-02 | 16 | 31.2% | -$2.53 | Baseline pre-v4.7 (ultimo prima del fix) |
 | 2026-07-03 | — | — | — | v4.8 deploy: ADX fix + candle recovery + limiti conservativi |
 | **2026-07-22** | **56** | **50.0%** | **-$1.62** | Snapshot post-v4.11. Vedi breakdown qui sotto. |
+| **2026-08-04** | **64** | **46.9%** | **-$2.73** | Post-v4.12. 8 nuovi BUY_5M (WR ~25%) — R:R 1:0.7 confermato problema. Equity ~$194, balance libero $173.98. v4.13 deployato oggi. |
 
 **Snapshot 2026-07-22 — 56 trade (28W/28L):**
 | Motore | Trade | WR | PnL | PF |
@@ -380,15 +396,18 @@ cron job settimanale o logica calendario). Da fare dopo 1 e 2.
 
 ## 🔭 Prossimi passi (da fare coi dati in mano)
 
-1. **✅ FATTO — v4.12: MR disabilitato** (decisione basata su 56 trade, 2026-07-22).
-   Bot opera solo in TRENDING_UP. Flag `MR_ENABLED = False` in config.py.
-   Checkpoint /stats dopo 20 trade post-v4.12 per verificare effetto sui profitti.
-2. **Checkpoint /stats post-v4.12**: target WR globale >60%, PnL netto positivo.
-   Se TRIX e BUY_5M continuano separatamente: TRIX è il motore da potenziare.
-3. **Verificare fee Kraken**: possibile cambio taker 0.26%→0.80% in Tier 1.
+1. **✅ FATTO — v4.12: MR disabilitato** (2026-07-22, 56 trade).
+   Flag `MR_ENABLED = False`. Bot opera solo in TRENDING_UP.
+2. **✅ FATTO — v4.13: ADX filter + Partial TP rimosso** (2026-08-04, 64 trade).
+   ADX ≥ 20 su BUY_5M. Partial TP eliminato → R:R teorico 1:3.3.
+3. **Checkpoint /stats post-v4.13** (obiettivo: ~15-20 nuovi trade).
+   Target: WR TRENDING_UP >65%, R medio ≥ 1:2, PnL netto positivo.
+   Se positivo → scala `TRADE_AMOUNT_TRENDING_UP` da $20 a $30-40.
+   Se negativo → diagnosi TRIX vs BUY_5M separatamente.
+4. **Verificare fee Kraken** (possibile cambio taker 0.26%→0.80% in Tier 1).
    Se confermato: aggiornare `FEE_RATE` in config.py + ricalibrare `MIN_TP1_NET_PCT`.
-4. **Implementare Donchian 1H** (backlog P1) dopo il checkpoint /stats post-v4.12.
-5. **Se mercato resta RANGING a lungo**: bot sarà idle. È corretto — meglio non
-   tradare che perdere $2.49 come in RANGING storico.
-6. **Freelance**: 5 proposte Upwork/giorno + Reddit r/forhire ogni giorno. Primo
+5. **Implementare Donchian 1H** (backlog P1) dopo il checkpoint /stats post-v4.13.
+6. **Se mercato resta RANGING a lungo**: bot sarà idle. È corretto — meglio non
+   tradare che perdere come in RANGING storico (-$2.49 su 28 trade).
+7. **Freelance**: 5 proposte Upwork/giorno + Reddit r/forhire ogni giorno. Primo
    cliente anche a prezzo ribassato → recensione → poi alza.
